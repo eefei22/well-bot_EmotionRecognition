@@ -16,25 +16,29 @@ Edge App → Cloud Service (Well-Bot_SER) → Supabase Database
    - **Endpoint**: `POST /analyze-speech`
    - **Content-Type**: `multipart/form-data`
    - **Body**: 
-     - Field name: `file`
-     - File type: `.wav` audio file
+     - Field name: `file` - WAV audio file (required)
+     - Field name: `user_id` - UUID of the user (required)
    - **Example**:
      ```python
      import requests
      
      url = "https://your-cloud-service-url/analyze-speech"
+     user_id = "8517c97f-66ef-4955-86ed-531013d33d3e"  # User UUID from edge app
+     
      with open("audio.wav", "rb") as audio_file:
          files = {"file": ("audio.wav", audio_file, "audio/wav")}
-         response = requests.post(url, files=files)
+         data = {"user_id": user_id}
+         response = requests.post(url, files=files, data=data)
      ```
 
 ### 2. **API Endpoint** (`app/api/speech.py`)
-   - Receives the uploaded audio file
+   - Receives the uploaded audio file and user_id from request
+   - Validates user_id format (must be valid UUID)
    - Validates file extension (must be `.wav`)
    - Saves uploaded file to temporary location
    - Extracts audio metadata (sample_rate, duration)
    - Calls the processing pipeline
-   - Maps results to database schema
+   - Maps results to database schema with user_id from request
    - Saves to Supabase database
    - Returns analysis result (optional - can be ignored)
 
@@ -81,7 +85,7 @@ Edge App → Cloud Service (Well-Bot_SER) → Supabase Database
      - `sentiment` → `sentiment`
      - `sentiment_confidence` → `sentiment_confidence`
    - Adds required fields:
-     - `user_id` (from `DEV_USER_ID` in `.env`)
+     - `user_id` (from request `user_id` parameter)
      - `timestamp` (current time)
      - `sample_rate` (from audio metadata)
      - `frame_size_ms` (default: 25.0)
@@ -109,7 +113,7 @@ Edge App → Cloud Service (Well-Bot_SER) → Supabase Database
 ```env
 SUPABASE_URL=<your_supabase_url>
 SUPABASE_SERVICE_ROLE_KEY=<your_service_role_key>
-DEV_USER_ID=<user_uuid>
+# Note: DEV_USER_ID is no longer used - user_id comes from request
 ```
 
 ### Database Table Schema
@@ -153,6 +157,7 @@ DEV_USER_ID=<user_uuid>
 ## Security
 
 - File validation: Only `.wav` files accepted
-- User identification: Controlled via `DEV_USER_ID` (single user per deployment)
+- User identification: Provided by edge app in each request (`user_id` parameter)
+- UUID validation: User ID must be a valid UUID format
 - Database: Uses Supabase service role key for authentication
 
