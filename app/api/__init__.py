@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api import emotion
+from app.api import speech
 
 api_router = APIRouter()
-api_router.include_router(emotion.router, prefix="", tags=["Emotion"])
+api_router.include_router(speech.router, prefix="", tags=["Emotion"])
