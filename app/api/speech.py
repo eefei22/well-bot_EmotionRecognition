@@ -1,13 +1,13 @@
 # app/api/speech.py
 
-from fastapi import APIRouter, UploadFile, File
+from fastapi import APIRouter, UploadFile, File, Form
 from fastapi.responses import JSONResponse
 import tempfile
 import shutil
 import logging
+import uuid
 
 from app.services.speech_ProcessingPipeline import analyze_full
-from app.core.config import settings
 from app.models.speech import VoiceEmotionCreate
 from app.crud.speech import insert_voice_emotion
 import torchaudio
@@ -17,7 +17,29 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 @router.post("/analyze-speech")
-async def analyze_speech(file: UploadFile = File(...)):
+async def analyze_speech(
+    file: UploadFile = File(...),
+    user_id: str = Form(...)
+):
+    """
+    Analyze speech audio for emotion, transcription, language, and sentiment.
+    
+    Args:
+        file: WAV audio file to analyze
+        user_id: UUID of the user (required)
+    
+    Returns:
+        Dictionary with analysis_result containing emotion, transcript, language, and sentiment
+    """
+    # Validate user_id is a valid UUID format
+    try:
+        uuid.UUID(user_id)
+    except ValueError:
+        return JSONResponse(
+            status_code=400, 
+            content={"error": f"Invalid user_id format: {user_id}. Must be a valid UUID."}
+        )
+    
     if not file.filename.endswith(".wav"):
         return JSONResponse(status_code=400, content={"error": "Only .wav files are supported."})
 
@@ -41,9 +63,6 @@ async def analyze_speech(file: UploadFile = File(...)):
 
     # Analyse Speech
     analysis_result = analyze_full(tmp_path)
-
-    # Get user_id from DEV_USER_ID in settings
-    user_id = settings.DEV_USER_ID
 
     # Map analysis_result fields to database schema
     try:

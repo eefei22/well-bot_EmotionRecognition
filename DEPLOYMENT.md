@@ -18,10 +18,11 @@ Create a `.env` file with the following variables (these will be set in Cloud Ru
 ```env
 SUPABASE_URL=<your_supabase_url>
 SUPABASE_SERVICE_ROLE_KEY=<your_service_role_key>
-DEV_USER_ID=<your_user_uuid>
 ```
 
-**Note**: For Cloud Run, these will be set as environment variables in the service configuration.
+**Note**: 
+- For Cloud Run, these will be set as environment variables in the service configuration.
+- `user_id` is no longer required in `.env` - it is passed by the edge app in each request.
 
 ## Step 2: Build and Test Docker Image Locally (Optional)
 
@@ -47,14 +48,12 @@ gcloud run deploy well-bot-ser \
   --region asia-south1 \
   --platform managed \
   --allow-unauthenticated \
-  --port 8008 \
   --memory 2Gi \
   --cpu 2 \
   --timeout 300 \
   --max-instances 10 \
   --set-env-vars SUPABASE_URL=<your_supabase_url> \
-  --set-env-vars SUPABASE_SERVICE_ROLE_KEY=<your_service_role_key> \
-  --set-env-vars DEV_USER_ID=<your_user_uuid>
+  --set-env-vars SUPABASE_SERVICE_ROLE_KEY=<your_service_role_key>
 ```
 
 ### Option B: Deploy from Container Registry
@@ -69,14 +68,12 @@ gcloud run deploy well-bot-ser \
   --region asia-south1 \
   --platform managed \
   --allow-unauthenticated \
-  --port 8008 \
   --memory 2Gi \
   --cpu 2 \
   --timeout 300 \
   --max-instances 10 \
   --set-env-vars SUPABASE_URL=<your_supabase_url> \
-  --set-env-vars SUPABASE_SERVICE_ROLE_KEY=<your_service_role_key> \
-  --set-env-vars DEV_USER_ID=<your_user_uuid>
+  --set-env-vars SUPABASE_SERVICE_ROLE_KEY=<your_service_role_key>
 ```
 
 ## Step 4: Get Your Service URL
@@ -121,12 +118,15 @@ python test_micstream_ser.py --file audio.wav
 Set these in Cloud Run:
 - `SUPABASE_URL`: Your Supabase project URL
 - `SUPABASE_SERVICE_ROLE_KEY`: Your Supabase service role key
-- `DEV_USER_ID`: UUID of the user for all requests
+
+**Note**: `user_id` is passed by the edge app in each request, not via environment variables.
 
 ### Port Configuration
 
-- The service runs on port **8008** internally
+- Cloud Run sets `PORT=8080` environment variable automatically
+- The Dockerfile uses this PORT variable (defaults to 8008 for local development)
 - Cloud Run automatically maps this to HTTPS on port 443
+- **Note**: Do not use `--port` flag in deployment - Cloud Run handles port mapping automatically
 
 ## Testing the Deployment
 
@@ -134,7 +134,8 @@ Set these in Cloud Run:
 
 ```bash
 curl -X POST "https://your-service-url.run.app/analyze-speech" \
-  -F "file=@audio.wav"
+  -F "file=@audio.wav" \
+  -F "user_id=8517c97f-66ef-4955-86ed-531013d33d3e"
 ```
 
 ### Test with Python:
@@ -143,9 +144,12 @@ curl -X POST "https://your-service-url.run.app/analyze-speech" \
 import requests
 
 url = "https://your-service-url.run.app/analyze-speech"
+user_id = "8517c97f-66ef-4955-86ed-531013d33d3e"  # User UUID
+
 with open("audio.wav", "rb") as f:
     files = {"file": ("audio.wav", f, "audio/wav")}
-    response = requests.post(url, files=files)
+    data = {"user_id": user_id}
+    response = requests.post(url, files=files, data=data)
     print(response.json())
 ```
 
