@@ -2,7 +2,7 @@
 
 ## System Overview
 
-Well-Bot_v6 is a modular FastAPI-based backend designed to process spoken input, analyze emotional state and sentiment, generate empathetic responses using an LLM, and synthesize those responses into speech. It supports multilingual interactions (including Malay, English, and Indonesian), and is built to integrate into a Raspberry Pi-based wellness droid. The system uses HuggingFace Transformers, DeepSeek API, and Google TTS for core functionality.
+Well-Bot_v6 is a modular FastAPI-based backend designed to process spoken input and analyze emotional state and sentiment. It supports multilingual interactions (including Malay, English, and Indonesian), and is built to integrate into a Raspberry Pi-based wellness droid. The system uses HuggingFace Transformers for core functionality.
 
 ## File Directory Structure
 ```
@@ -13,7 +13,7 @@ WELL-BOT_V6/
 │   ├── core/                # Configuration and database initialization
 │   ├── crud/                # Business logic and DB interaction for speech data
 │   ├── models/              # Pydantic data schemas for request/response validation
-│   ├── services/            # Modular ML components: emotion, sentiment, transcription, generation, TTS
+│   ├── services/            # Modular ML components: emotion, sentiment, transcription
 │
 ├── data/                    # Local data storage
 │   ├── audio_raw/           # Raw downloaded datasets for training/analysis
@@ -47,16 +47,6 @@ WELL-BOT_V6/
     - Analyzes sentiment of the transcript using **XLM-RoBERTa-based sentiment model** (`cardiffnlp/twitter-xlm-roberta-base-sentiment`).
     - Returns sentiment label and confidence.
 
-### `speech_DialogueManager.py`
-- Generates a warm and supportive response using the **DeepSeek API** (LLM chat API).
-- Constructs a chat prompt based on emotion, sentiment, and transcript.
-- Returns the generated response text.
-
-### `speech_SpeechSynthesis.py`
-- Converts the generated response text to an MP3 audio file using **gTTS** (Google Text-to-Speech).
-- Automatically selects language based on detected speech language.
-- Returns the path to the generated audio file.
-
 # Models Used
 ### **Emotion Recognition**
 - Model: `superb/wav2vec2-base-superb-er`
@@ -72,14 +62,4 @@ WELL-BOT_V6/
 - Model: `cardiffnlp/twitter-xlm-roberta-base-sentiment`
 - Framework: HuggingFace Transformers
 - Purpose: Classify sentiment polarity of transcript text.
-
-### **Dialogue Manager**
-- Model: DeepSeek API → `deepseek-chat`
-- Framework: External API (OpenAI-compatible)
-- Purpose: Generate warm and supportive responses based on emotion, sentiment, and transcript.
-
-### **Speech Synthesis**
-- Model: `gTTS` (Google Text-to-Speech)
-- Framework: gTTS Python library
-- Purpose: Convert generated response text to speech (MP3), supports `en`, `id`, `ms`.
 

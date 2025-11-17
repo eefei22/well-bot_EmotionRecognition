@@ -1,13 +1,13 @@
 # app/core/config.py
-from pydantic import BaseSettings
+from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
-    MONGODB_URL: str
+    SUPABASE_URL: str
+    SUPABASE_SERVICE_ROLE_KEY: str
+    DEV_USER_ID: str
 
     class Config:
         env_file = ".env"
+        extra = "ignore"  # Ignore extra fields in .env that aren't defined here
 
 settings = Settings()
-
-
-#Load this with settings.MONGODB_URL anywhere in your code.

@@ -4,7 +4,7 @@ uvicorn[standard]==0.29.0
 
 # Speech & Audio Processing
 transformers==4.41.1
-sentencepiece==0.2.0
+sentencepiece>=0.2.0,<1.0.0
 torch==2.3.0
 torchaudio==2.3.0
 librosa==0.10.1
@@ -14,14 +14,12 @@ protobuf==3.20.3
 langdetect==1.0.9
 kagglehub==0.2.0
 
-# TTS
-gTTS==2.3.2  # Added for fallback TTS, works on Python 3.11+
-
-# MongoDB async driver
-motor==2.5.1
+# Supabase client (REST API)
+supabase>=2.4.0
 
 # Environment Configuration
 pydantic==2.7.1
+pydantic-settings==2.1.0
 python-dotenv==1.0.1
 
 # Machine Learning & Preprocessing
@@ -32,4 +30,5 @@ joblib==1.4.2
 
 # Testing
 pytest==8.2.0
-httpx==0.27.0
+httpx[http2]>=0.26,<0.28
+python-multipart

@@ -1,7 +1,7 @@
 # app/services/speech_Pipeline.py
 
 from app.services.speech_EmotionRecognition import predict_emotion
-from app.services.speech_Transcription import transcribe_audio
+from app.services.speech_transcription import transcribe_audio
 from app.services.speech_SentimentAnalysis import analyze_sentiment
 from langdetect import detect
 
