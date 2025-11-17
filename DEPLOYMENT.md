@@ -188,20 +188,47 @@ gcloud run services logs read well-bot-ser --region asia-south1
 - Check audio file size (Cloud Run has request size limits)
 
 ### Memory errors:
-- Increase memory: `--memory 4Gi`
-- Models load on first request, may need more memory initially
+- **Lazy Loading**: Models are now loaded on first use (not at startup), reducing initial memory
+- **CPU-only PyTorch**: Dockerfile uses CPU-only PyTorch builds to save memory
+- **Memory Cleanup**: Models clean up memory after each inference
+- If still failing, increase memory: `--memory 4Gi`
+- Check logs for model loading messages to identify which model is causing issues
 
 ### Connection refused:
 - Verify service is deployed: `gcloud run services list`
 - Check service URL is correct
 - Ensure `--allow-unauthenticated` flag is set
 
+## Memory Optimizations
+
+The service has been optimized to reduce memory usage:
+
+1. **Lazy Model Loading**: Models are loaded only when first used, not at startup
+   - Emotion recognition model loads on first emotion analysis request
+   - Transcription model loads on first transcription request
+   - Sentiment model loads on first sentiment analysis request
+
+2. **CPU-only PyTorch**: Uses CPU-only PyTorch builds (smaller, saves memory)
+   - Cloud Run doesn't provide GPUs, so GPU builds are unnecessary
+   - Reduces Docker image size and memory footprint
+
+3. **Memory Cleanup**: Automatic garbage collection after each inference
+   - Cleans up temporary tensors and variables
+   - Reduces memory accumulation over time
+
+4. **Slim Base Image**: Uses `python:3.11-slim` instead of full Python image
+   - Smaller base image reduces build time and memory
+
+5. **Optimized Environment Variables**: 
+   - Hugging Face cache set to `/tmp` (ephemeral storage)
+   - PyTorch memory allocation limits configured
+
 ## Cost Optimization
 
 - **Min Instances**: Set to 0 for cost savings (cold starts may occur)
 - **Max Instances**: Limit based on expected load
 - **CPU**: Can reduce to 1 for lower costs (slower processing)
-- **Memory**: Minimum 2Gi recommended for ML models
+- **Memory**: Minimum 2Gi recommended for ML models (can start with 2Gi due to optimizations)
 
 ## Security Notes
 

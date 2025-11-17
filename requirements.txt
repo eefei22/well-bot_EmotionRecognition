@@ -5,8 +5,9 @@ uvicorn[standard]==0.29.0
 # Speech & Audio Processing
 transformers==4.41.1
 sentencepiece>=0.2.0,<1.0.0
-torch==2.3.0
-torchaudio==2.3.0
+# Note: torch and torchaudio are installed separately in Dockerfile with CPU-only version
+# to save memory. They are NOT listed here to avoid syntax issues with requirements.txt.
+# The Dockerfile installs: torch==2.3.0 torchaudio==2.3.0 --index-url https://download.pytorch.org/whl/cpu
 librosa==0.10.1
 soundfile==0.12.1
 huggingface-hub==0.23.1
