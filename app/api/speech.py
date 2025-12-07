@@ -1,6 +1,6 @@
 # app/api/speech.py
 
-from fastapi import APIRouter, UploadFile, File, Form
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.responses import JSONResponse
 import tempfile
 import shutil
@@ -8,8 +8,8 @@ import logging
 import uuid
 
 from app.services.speech_ProcessingPipeline import analyze_full
-from app.models.speech import VoiceEmotionCreate
-from app.crud.speech import insert_voice_emotion
+from app.models.speech import VoiceEmotionCreate, ModelPredictRequest, ModelPredictResponse
+from app.crud.speech import insert_voice_emotion, query_voice_emotion_by_window
 import torchaudio
 
 logger = logging.getLogger(__name__)
@@ -91,4 +91,46 @@ async def analyze_speech(
     return {
         "analysis_result": analysis_result
     }
+
+
+@router.post("/predict", response_model=ModelPredictResponse)
+async def predict_emotion(request: ModelPredictRequest):
+    """
+    Get emotion predictions from voice_emotion table within a time window.
+    
+    This endpoint is used by the fusion service to query recent emotion predictions.
+    
+    Args:
+        request: ModelPredictRequest with user_id, snapshot_timestamp, and window_seconds
+    
+    Returns:
+        ModelPredictResponse with list of signals (ModelSignal objects)
+    """
+    # Validate user_id is a valid UUID format
+    try:
+        uuid.UUID(request.user_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid user_id format: '{request.user_id}'. Must be a valid UUID."
+        )
+    
+    try:
+        # Query voice_emotion table for records within time window
+        signals = query_voice_emotion_by_window(
+            user_id=request.user_id,
+            snapshot_timestamp=request.snapshot_timestamp,
+            window_seconds=request.window_seconds
+        )
+        
+        logger.info(f"Returning {len(signals)} signals for user {request.user_id}")
+        
+        return ModelPredictResponse(signals=signals)
+        
+    except ValueError as e:
+        logger.error(f"Validation error in /predict: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error querying voice emotion predictions: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
