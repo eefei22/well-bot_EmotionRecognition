@@ -83,8 +83,9 @@ def query_voice_emotion_by_window(
         
         # Query voice_emotion table
         # Filter by user_id and timestamp within window
+        # Note: Primary key is 'frame_id', but we don't need it for ModelSignal
         response = client.table("voice_emotion")\
-            .select("id, user_id, timestamp, predicted_emotion, emotion_confidence")\
+            .select("user_id, timestamp, predicted_emotion, emotion_confidence")\
             .eq("user_id", user_id)\
             .gte("timestamp", window_start.isoformat())\
             .lte("timestamp", snapshot_timestamp)\
