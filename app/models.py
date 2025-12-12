@@ -47,3 +47,24 @@ class AggregatedResult(BaseModel):
     emotion_confidence: float
     sentiment: Optional[str] = None
     sentiment_confidence: Optional[float] = None
+
+
+class PredictRequest(BaseModel):
+    """Request model for /predict endpoint (used by fusion service)."""
+    user_id: str
+    snapshot_timestamp: str  # ISO format timestamp
+    window_seconds: int = 60  # Time window in seconds
+
+
+class ModelSignal(BaseModel):
+    """Model prediction signal structure (matches fusion service contract)."""
+    user_id: str
+    timestamp: str  # ISO format timestamp
+    modality: str = "speech"  # Always "speech" for SER
+    emotion_label: str  # "Angry" | "Sad" | "Happy" | "Fear"
+    confidence: float  # Confidence score between 0.0 and 1.0
+
+
+class ModelPredictResponse(BaseModel):
+    """Response structure for /predict endpoint (matches fusion service contract)."""
+    signals: list[ModelSignal] = []

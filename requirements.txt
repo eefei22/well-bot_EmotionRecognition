@@ -1,8 +1,9 @@
 # cd Well-Bot_SER
 # .\venv\Scripts\Activate.ps1
+# python test\test_ser_queue_recording.py
 # python -m pip install -r requirements.txt
 # py -3.12 -m venv venv
-# python test\test_ser_queue_recording.py
+# https://well-bot-emotionrecognition-520080168829.asia-south1.run.app/ser/dashboard
 
 # FastAPI Framework
 fastapi==0.110.0

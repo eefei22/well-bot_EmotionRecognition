@@ -10,7 +10,7 @@ Usage:
     
 Options:
     --user-id UUID       User UUID (default: test user UUID)
-    --url URL            SER service URL (default: http://localhost:8008)
+    --url URL            SER service URL (default: Cloud Run URL or SER_SERVICE_URL env var)
     --duration SECONDS   Recording duration per chunk in seconds (default: 10)
     --max-chunks N       Maximum number of chunks to send (default: infinite)
 """
@@ -35,7 +35,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # SER Service URL (can be overridden via --url argument or SER_SERVICE_URL env var)
-SER_SERVICE_URL = os.getenv("SER_SERVICE_URL", "http://localhost:8008")
+SER_SERVICE_URL = os.getenv("SER_SERVICE_URL", "https://well-bot-emotionrecognition-520080168829.asia-south1.run.app")
 SER_ENDPOINT = "/ser/analyze-speech"
 SER_TIMEOUT = 30
 
@@ -309,6 +309,9 @@ Examples:
   python test_ser_queue_recording.py --duration 5 --max-chunks 10
   
   # Specify user ID and service URL
+  python test_ser_queue_recording.py --url https://well-bot-emotionrecognition-520080168829.asia-south1.run.app --user-id "your-uuid-here"
+  
+  # Use local development server
   python test_ser_queue_recording.py --url http://localhost:8008 --user-id "your-uuid-here"
         """
     )
