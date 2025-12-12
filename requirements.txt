@@ -1,3 +1,9 @@
+# cd Well-Bot_SER
+# .\venv\Scripts\Activate.ps1
+# python -m pip install -r requirements.txt
+# py -3.12 -m venv venv
+# python test\test_ser_queue_recording.py
+
 # FastAPI Framework
 fastapi==0.110.0
 uvicorn[standard]==0.29.0
@@ -14,6 +20,10 @@ huggingface-hub==0.23.1
 protobuf==3.20.3
 langdetect==1.0.9
 kagglehub==0.2.0
+
+# FunASR and emotion2vec+ (Speech Emotion Recognition)
+funasr>=1.0.0
+modelscope>=1.0.0
 
 # Supabase client (REST API)
 supabase>=2.4.0

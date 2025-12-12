@@ -1,20 +1,18 @@
 #!/usr/bin/env python3
 """
-Test Script: Local Recording + Remote SER Service
+Test Script: Local Recording + SER Queue
 
-This script records audio locally from the microphone and sends it to the remote SER service
-for emotion recognition, transcription, and sentiment analysis.
+This script records audio locally from the microphone and sends it to the SER service
+queue for processing. Records continuously in 10-second chunks.
 
 Usage:
-    python test_local_record_remote_ser.py [OPTIONS]
+    python test_ser_queue_recording.py [OPTIONS]
     
 Options:
-    --duration SECONDS    Recording duration per chunk in seconds (default: 5)
     --user-id UUID       User UUID (default: test user UUID)
-    --file PATH          Use existing audio file instead of recording
-    --url URL            SER service URL (default: http://localhost:8008 or SER_SERVICE_URL env var)
-    --continuous         Continuously record and send chunks in a loop (press Ctrl+C to stop)
-    --max-chunks N       Maximum number of chunks to send in continuous mode (default: infinite)
+    --url URL            SER service URL (default: http://localhost:8008)
+    --duration SECONDS   Recording duration per chunk in seconds (default: 10)
+    --max-chunks N       Maximum number of chunks to send (default: infinite)
 """
 
 import os
@@ -38,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 # SER Service URL (can be overridden via --url argument or SER_SERVICE_URL env var)
 SER_SERVICE_URL = os.getenv("SER_SERVICE_URL", "http://localhost:8008")
-SER_ENDPOINT = "/analyze-speech"
+SER_ENDPOINT = "/ser/analyze-speech"
 SER_TIMEOUT = 30
 
 # Default test user ID
@@ -153,9 +151,9 @@ def save_audio_to_wav(audio_chunks: list, sample_rate: int, output_path: Path) -
         return False
 
 
-def send_audio_to_ser(audio_file_path: Path, service_url: str, user_id: str) -> Optional[dict]:
+def send_audio_to_queue(audio_file_path: Path, service_url: str, user_id: str) -> Optional[dict]:
     """
-    Send audio file to SER service for analysis.
+    Send audio file to SER service queue.
     
     Args:
         audio_file_path: Path to WAV audio file
@@ -163,11 +161,11 @@ def send_audio_to_ser(audio_file_path: Path, service_url: str, user_id: str) -> 
         user_id: UUID of the user
     
     Returns:
-        Dictionary with analysis results if successful, None if failed
+        Dictionary with queue status if successful, None if failed
     """
     try:
         url = f"{service_url}{SER_ENDPOINT}"
-        logger.info(f"Sending audio to SER service: {url}")
+        logger.info(f"Sending audio to SER queue: {url}")
         logger.info(f"User ID: {user_id}")
         logger.info(f"Audio file: {audio_file_path}")
         
@@ -182,7 +180,8 @@ def send_audio_to_ser(audio_file_path: Path, service_url: str, user_id: str) -> 
         
         if response.status_code == 200:
             result = response.json()
-            logger.info("✅ SER service responded successfully")
+            queue_size = result.get("queue_size", 0)
+            logger.info(f"✅ Audio chunk queued successfully (queue size: {queue_size})")
             return result
         else:
             logger.error(f"❌ SER service error: {response.status_code} - {response.text}")
@@ -200,62 +199,25 @@ def send_audio_to_ser(audio_file_path: Path, service_url: str, user_id: str) -> 
         return None
 
 
-def display_result(result: dict):
+def test_continuous_recording(duration_seconds: float, user_id: str, max_chunks: Optional[int] = None):
     """
-    Display analysis result in a readable format.
-    
-    Args:
-        result: Analysis result dictionary from SER service
-    """
-    if not result:
-        logger.warning("No result to display")
-        return
-    
-    logger.info("=" * 60)
-    logger.info("SER ANALYSIS RESULTS")
-    logger.info("=" * 60)
-    
-    analysis_result = result.get("analysis_result", {})
-    
-    if analysis_result:
-        emotion = analysis_result.get("emotion", "unknown")
-        emotion_confidence = analysis_result.get("emotion_confidence", 0.0)
-        transcript = analysis_result.get("transcript", "")
-        language = analysis_result.get("language", "unknown")
-        sentiment = analysis_result.get("sentiment", "unknown")
-        sentiment_confidence = analysis_result.get("sentiment_confidence", 0.0)
-        
-        logger.info(f"Emotion: {emotion} (confidence: {emotion_confidence:.3f})")
-        logger.info(f"Transcript: {transcript}")
-        logger.info(f"Language: {language}")
-        logger.info(f"Sentiment: {sentiment} (confidence: {sentiment_confidence:.3f})")
-    else:
-        logger.warning("No analysis_result in response")
-        logger.info(f"Full response: {result}")
-    
-    logger.info("=" * 60)
-
-
-def test_with_microphone(duration_seconds: float, user_id: str, continuous: bool = False, max_chunks: Optional[int] = None):
-    """
-    Test SER service with microphone recording.
+    Test SER queue with continuous microphone recording.
     
     Args:
         duration_seconds: Recording duration per chunk
         user_id: User UUID
-        continuous: If True, continuously record and send chunks in a loop
         max_chunks: Maximum number of chunks to send (None = infinite)
     """
     logger.info("=" * 60)
-    logger.info("TEST: Local Recording + Remote SER Service")
+    logger.info("TEST: Continuous Recording + SER Queue")
     logger.info("=" * 60)
     logger.info(f"Recording duration per chunk: {duration_seconds} seconds")
     logger.info(f"User ID: {user_id}")
     logger.info(f"SER Service: {SER_SERVICE_URL}")
-    if continuous:
-        logger.info(f"Mode: CONTINUOUS (max_chunks: {max_chunks or 'infinite'})")
-    else:
-        logger.info("Mode: SINGLE RECORDING")
+    logger.info(f"Dashboard: {SER_SERVICE_URL}/ser/dashboard")
+    logger.info(f"Max chunks: {max_chunks or 'infinite'}")
+    logger.info("=" * 60)
+    logger.info("Press Ctrl+C to stop recording")
     logger.info("=" * 60)
     
     chunk_count = 0
@@ -273,8 +235,6 @@ def test_with_microphone(duration_seconds: float, user_id: str, continuous: bool
             
             if not audio_chunks:
                 logger.error("Failed to capture audio")
-                if not continuous:
-                    return
                 logger.warning("Continuing to next chunk...")
                 time.sleep(1)
                 continue
@@ -286,26 +246,21 @@ def test_with_microphone(duration_seconds: float, user_id: str, continuous: bool
             
             if not save_audio_to_wav(audio_chunks, sample_rate, temp_path):
                 logger.error("Failed to save audio file")
-                if not continuous:
-                    return
                 logger.warning("Continuing to next chunk...")
                 time.sleep(1)
                 continue
             
             try:
-                # Step 3: Send to SER service (non-blocking for continuous mode)
-                logger.info(f"[Chunk #{chunk_count}] Sending to SER service...")
-                result = send_audio_to_ser(temp_path, SER_SERVICE_URL, user_id)
+                # Step 3: Send to SER queue
+                logger.info(f"[Chunk #{chunk_count}] Sending to SER queue...")
+                result = send_audio_to_queue(temp_path, SER_SERVICE_URL, user_id)
                 
                 if result:
-                    logger.info(f"[Chunk #{chunk_count}] ✅ Queued successfully")
-                    if not continuous:
-                        # Display result only for single recording mode
-                        display_result(result)
+                    queue_size = result.get("queue_size", 0)
+                    logger.info(f"[Chunk #{chunk_count}] ✅ Queued (queue size: {queue_size})")
+                    logger.info(f"   View queue at: {SER_SERVICE_URL}/ser/dashboard")
                 else:
                     logger.error(f"[Chunk #{chunk_count}] ❌ Failed to queue")
-                    if not continuous:
-                        return
                     
             finally:
                 # Clean up temp file
@@ -316,16 +271,13 @@ def test_with_microphone(duration_seconds: float, user_id: str, continuous: bool
                     except Exception as e:
                         logger.warning(f"Failed to clean up temp file: {e}")
             
-            # Break if not continuous mode
-            if not continuous:
-                break
-            
             # Check max_chunks limit
             if max_chunks and chunk_count >= max_chunks:
+                logger.info("")
                 logger.info(f"Reached maximum chunks ({max_chunks}). Stopping.")
                 break
             
-            # Small delay before next chunk (optional, to avoid overwhelming the queue)
+            # Small delay before next chunk
             logger.info(f"[Chunk #{chunk_count}] Waiting 1 second before next recording...")
             time.sleep(1)
             
@@ -334,40 +286,11 @@ def test_with_microphone(duration_seconds: float, user_id: str, continuous: bool
         logger.info("=" * 60)
         logger.info("Recording interrupted by user (Ctrl+C)")
         logger.info(f"Total chunks sent: {chunk_count}")
+        logger.info(f"View queue at: {SER_SERVICE_URL}/ser/dashboard")
         logger.info("=" * 60)
     except Exception as e:
         logger.error(f"Unexpected error: {e}", exc_info=True)
-        if not continuous:
-            raise
-
-
-def test_with_file(audio_file_path: Path, user_id: str):
-    """
-    Test SER service with existing audio file.
-    
-    Args:
-        audio_file_path: Path to audio file
-        user_id: User UUID
-    """
-    logger.info("=" * 60)
-    logger.info("TEST: Existing Audio File + Remote SER Service")
-    logger.info("=" * 60)
-    logger.info(f"Audio file: {audio_file_path}")
-    logger.info(f"User ID: {user_id}")
-    logger.info(f"SER Service: {SER_SERVICE_URL}")
-    logger.info("=" * 60)
-    
-    if not audio_file_path.exists():
-        logger.error(f"Audio file not found: {audio_file_path}")
-        return
-    
-    # Send to SER service
-    result = send_audio_to_ser(audio_file_path, SER_SERVICE_URL, user_id)
-    
-    if result:
-        display_result(result)
-    else:
-        logger.error("Failed to get result from SER service")
+        raise
 
 
 def main():
@@ -375,32 +298,26 @@ def main():
     global SER_SERVICE_URL
     
     parser = argparse.ArgumentParser(
-        description="Test local recording with remote SER service",
+        description="Test SER queue with continuous microphone recording",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Record 5 seconds and send to SER service (single recording)
-  python test_local_record_remote_ser.py
+  # Record 10-second chunks continuously (infinite loop, press Ctrl+C to stop)
+  python test_ser_queue_recording.py
   
-  # Record 10 seconds continuously (infinite loop, press Ctrl+C to stop)
-  python test_local_record_remote_ser.py --duration 10 --continuous
+  # Record 5-second chunks, send 10 chunks then stop
+  python test_ser_queue_recording.py --duration 5 --max-chunks 10
   
-  # Record 10 seconds, send 5 chunks then stop
-  python test_local_record_remote_ser.py --duration 10 --continuous --max-chunks 5
-  
-  # Use existing audio file (single file only)
-  python test_local_record_remote_ser.py --file path/to/audio.wav
-  
-  # Specify user ID and local service
-  python test_local_record_remote_ser.py --url http://localhost:8008 --user-id "your-uuid-here" --continuous
+  # Specify user ID and service URL
+  python test_ser_queue_recording.py --url http://localhost:8008 --user-id "your-uuid-here"
         """
     )
     
     parser.add_argument(
         "--duration",
         type=float,
-        default=5.0,
-        help="Recording duration in seconds (default: 5.0)"
+        default=10.0,
+        help="Recording duration per chunk in seconds (default: 10.0)"
     )
     
     parser.add_argument(
@@ -411,28 +328,16 @@ Examples:
     )
     
     parser.add_argument(
-        "--file",
-        type=str,
-        help="Use existing audio file instead of recording"
-    )
-    
-    parser.add_argument(
         "--url",
         type=str,
         help=f"SER service URL (default: {SER_SERVICE_URL} or from SER_SERVICE_URL env var)"
     )
     
     parser.add_argument(
-        "--continuous",
-        action="store_true",
-        help="Continuously record and send chunks in a loop (default: False)"
-    )
-    
-    parser.add_argument(
         "--max-chunks",
         type=int,
         default=None,
-        help="Maximum number of chunks to send in continuous mode (default: infinite)"
+        help="Maximum number of chunks to send (default: infinite)"
     )
     
     args = parser.parse_args()
@@ -450,19 +355,13 @@ Examples:
         sys.exit(1)
     
     # Run test
-    if args.file:
-        # Test with existing file (single file only, no continuous mode)
-        audio_file = Path(args.file)
-        test_with_file(audio_file, args.user_id)
-    else:
-        # Test with microphone recording
-        test_with_microphone(
-            args.duration, 
-            args.user_id,
-            continuous=args.continuous,
-            max_chunks=args.max_chunks
-        )
+    test_continuous_recording(
+        args.duration, 
+        args.user_id,
+        max_chunks=args.max_chunks
+    )
 
 
 if __name__ == "__main__":
     main()
+

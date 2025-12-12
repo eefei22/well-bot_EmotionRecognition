@@ -1,4 +1,12 @@
-# app/services/speech_AudioPreprocessing.py
+"""
+Audio Preprocessing Utilities
+
+Audio preprocessing functions for emotion recognition.
+CRITICAL CONSTRAINTS:
+- No signal warping (no time-stretching or pitch-shifting)
+- Edge-only silence removal (never remove internal pauses)
+- Peak normalization only (no compression/AGC)
+"""
 
 import librosa
 import soundfile as sf
@@ -25,38 +33,55 @@ def preprocess_audio(
     """
     Preprocess raw audio file for emotion recognition.
     
+    CRITICAL: Preserves speech signal integrity - no warping, no internal silence removal.
+    
     Args:
         input_path: Path to input audio file
         output_path: Path to save processed audio (if None, creates temp file)
-        remove_silence: Whether to trim leading/trailing silence
-        normalize: Whether to normalize audio levels
+        remove_silence: Whether to trim leading/trailing silence (edge-only, preserves internal pauses)
+        normalize: Whether to apply peak normalization (NOT compression/AGC)
         noise_reduction: Whether to apply noise reduction (requires noisereduce library)
     
     Returns:
         Path to processed audio file
     """
     try:
-        # Load audio with librosa (automatically converts to mono and resamples)
+        # Step 1: Load audio (auto-resample and mono conversion)
         y, sr = librosa.load(input_path, sr=TARGET_SAMPLE_RATE, mono=True)
-        
         logger.info(f"Loaded audio: {len(y)} samples at {sr}Hz")
         
-        # Remove silence (trim leading/trailing silence)
+        # Step 2: Edge-only trim (preserves internal pauses)
+        # librosa.effects.trim() ONLY removes leading/trailing silence, never internal pauses
         if remove_silence:
-            y_trimmed, _ = librosa.effects.trim(y, top_db=20)
-            if len(y_trimmed) > 0:
+            original_len = len(y)
+            y_trimmed, _ = librosa.effects.trim(y, top_db=30)
+            # Safety check: Keep at least 30% of original audio length
+            if len(y_trimmed) > original_len * 0.3:
                 y = y_trimmed
-                logger.info(f"Trimmed silence: {len(y)} samples remaining")
+                logger.info(
+                    f"Trimmed edge silence: {len(y)} samples remaining "
+                    f"({len(y)/original_len*100:.1f}% of original)"
+                )
+            else:
+                logger.warning(
+                    f"Trimmed audio too short ({len(y_trimmed)/original_len*100:.1f}% of original), "
+                    f"keeping original"
+                )
         
-        # Normalize audio
+        # Step 3: Peak normalization (NOT compression/AGC)
+        # Simple division by max - preserves dynamic range and natural speech dynamics
         if normalize:
-            # Peak normalization to [-1, 1]
             max_val = np.abs(y).max()
             if max_val > 0:
                 y = y / max_val
-            logger.info("Applied peak normalization")
+                logger.info(
+                    f"Applied peak normalization - max={np.abs(y).max():.6f}, "
+                    f"mean={y.mean():.6f}, std={y.std():.6f}"
+                )
+            else:
+                logger.warning("Audio is silent, skipping normalization")
         
-        # Noise reduction (optional - requires noisereduce library)
+        # Step 4: Optional noise reduction
         if noise_reduction:
             try:
                 import noisereduce as nr
@@ -65,19 +90,19 @@ def preprocess_audio(
             except ImportError:
                 logger.warning("noisereduce not installed, skipping noise reduction")
         
-        # Create output path if not provided
+        # Step 5: Create output path if not provided
         if output_path is None:
             fd, output_path = tempfile.mkstemp(suffix='.wav', prefix='processed_')
             os.close(fd)
         
-        # Save processed audio
+        # Step 6: Save processed audio
         sf.write(output_path, y, TARGET_SAMPLE_RATE, format='WAV', subtype='PCM_16')
         logger.info(f"Saved processed audio to: {output_path}")
         
         return output_path
         
     except Exception as e:
-        logger.error(f"Audio preprocessing failed: {e}")
+        logger.error(f"Audio preprocessing failed: {e}", exc_info=True)
         raise
 
 
@@ -101,14 +126,14 @@ def validate_audio(audio_path: str) -> Tuple[bool, str]:
         if file_size == 0:
             return False, "Audio file is empty"
         
-        # Try to load audio
+        # Try to load audio (quick validation with duration=1.0)
         y, sr = librosa.load(audio_path, sr=None, mono=False, duration=1.0)
         
         # Check duration
         if len(y) == 0:
             return False, "Audio file has no data"
         
-        # Check sample rate (warn if too low/high)
+        # Check sample rate (minimum 8kHz)
         if sr < 8000:
             return False, f"Sample rate too low: {sr}Hz (minimum 8000Hz)"
         
@@ -129,7 +154,7 @@ def get_audio_info(audio_path: str) -> dict:
         audio_path: Path to audio file
     
     Returns:
-        Dictionary with audio metadata
+        Dictionary with audio metadata: sample_rate, duration_sec, channels, samples
     """
     try:
         y, sr = librosa.load(audio_path, sr=None, mono=False)
@@ -142,6 +167,5 @@ def get_audio_info(audio_path: str) -> dict:
             "samples": len(y) if len(y.shape) == 1 else y.shape[1]
         }
     except Exception as e:
-        logger.error(f"Failed to get audio info: {e}")
+        logger.error(f"Failed to get audio info: {e}", exc_info=True)
         return {}
-
