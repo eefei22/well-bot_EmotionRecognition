@@ -14,6 +14,8 @@ from pydantic import BaseModel
 from app.models import PredictRequest, ModelPredictResponse, ModelSignal
 from .signal_storage import SignalStorage
 from .demo_mode import DemoModeManager
+from .emotion_bias import EmotionBiasManager
+from .generation_interval import GenerationIntervalManager
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +31,17 @@ class InjectSignalsRequest(BaseModel):
 class DemoModeRequest(BaseModel):
     """Request model for demo mode toggle."""
     enabled: bool
+
+
+class EmotionBiasRequest(BaseModel):
+    """Request model for emotion bias setting."""
+    modality: str  # "ser", "fer", "vitals"
+    emotion: Optional[str]  # "Happy", "Sad", "Fear", "Angry", or None to clear
+
+
+class GenerationIntervalRequest(BaseModel):
+    """Request model for generation interval setting."""
+    interval: int  # Interval in seconds
 
 
 @router.post("/ser/predict", response_model=ModelPredictResponse)
@@ -233,6 +246,114 @@ async def set_demo_mode(request: DemoModeRequest):
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
+@router.get("/emotion-bias")
+async def get_all_emotion_biases():
+    """
+    Get emotion bias for all modalities.
+    
+    Returns:
+        Dictionary mapping modality to bias emotion (or None)
+    """
+    try:
+        bias_manager = EmotionBiasManager.get_instance()
+        biases = bias_manager.get_all_biases()
+        return biases
+    except Exception as e:
+        logger.error(f"Error getting emotion biases: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@router.get("/emotion-bias/{modality}")
+async def get_emotion_bias(modality: str):
+    """
+    Get emotion bias for a specific modality.
+    
+    Args:
+        modality: Modality name ("ser", "fer", "vitals")
+    
+    Returns:
+        Dictionary with 'modality' and 'emotion' keys
+    """
+    try:
+        modality = modality.lower()
+        bias_manager = EmotionBiasManager.get_instance()
+        emotion = bias_manager.get_bias(modality)
+        return {"modality": modality, "emotion": emotion}
+    except Exception as e:
+        logger.error(f"Error getting emotion bias: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@router.post("/emotion-bias")
+async def set_emotion_bias(request: EmotionBiasRequest):
+    """
+    Set emotion bias for a specific modality.
+    
+    Args:
+        request: EmotionBiasRequest with modality and emotion (or None to clear)
+    
+    Returns:
+        Updated bias status
+    """
+    try:
+        modality = request.modality.lower()
+        bias_manager = EmotionBiasManager.get_instance()
+        bias_manager.set_bias(modality, request.emotion)
+        emotion = bias_manager.get_bias(modality)
+        
+        logger.info(f"Emotion bias for {modality} set to: {emotion}")
+        return {"modality": modality, "emotion": emotion}
+    except ValueError as e:
+        logger.error(f"Invalid emotion bias request: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error setting emotion bias: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@router.get("/generation-interval")
+async def get_generation_interval():
+    """
+    Get current signal generation interval.
+    
+    Returns:
+        Dictionary with interval and bounds
+    """
+    try:
+        interval_manager = GenerationIntervalManager.get_instance()
+        status = interval_manager.get_status()
+        return status
+    except Exception as e:
+        logger.error(f"Error getting generation interval: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@router.post("/generation-interval")
+async def set_generation_interval(request: GenerationIntervalRequest):
+    """
+    Set signal generation interval.
+    
+    Args:
+        request: GenerationIntervalRequest with interval in seconds
+    
+    Returns:
+        Updated interval status
+    """
+    try:
+        interval_manager = GenerationIntervalManager.get_instance()
+        interval_manager.set_interval(request.interval)
+        status = interval_manager.get_status()
+        
+        logger.info(f"Generation interval set to: {request.interval}s")
+        return status
+    except ValueError as e:
+        logger.error(f"Invalid generation interval request: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error setting generation interval: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
 @router.post("/inject-signals")
 async def inject_signals(request: InjectSignalsRequest):
     """
@@ -275,4 +396,5 @@ async def inject_signals(request: InjectSignalsRequest):
     except Exception as e:
         logger.error(f"Error injecting signals: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
 

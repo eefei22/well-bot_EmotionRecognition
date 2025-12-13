@@ -77,3 +77,4 @@ class DemoModeManager:
         with self._lock:
             return {"enabled": self._enabled}
 
+

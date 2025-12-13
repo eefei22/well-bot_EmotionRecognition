@@ -29,6 +29,7 @@ from app.models import ModelSignal
 from simulation.config import MODALITY_MAP, VALID_EMOTIONS, DEFAULT_GENERATION_INTERVAL, DEFAULT_SIGNAL_COUNT
 from simulation.signal_storage import SignalStorage
 from simulation.demo_mode import DemoModeManager
+from simulation.emotion_bias import EmotionBiasManager
 
 # Setup logging
 logging.basicConfig(
@@ -56,7 +57,8 @@ def generate_random_signals(
     user_id: str,
     modality: str,
     timestamp: datetime,
-    count: int = 1
+    count: int = 1,
+    bias_emotion: Optional[str] = None
 ) -> List[ModelSignal]:
     """
     Generate random ModelSignal objects for a given modality.
@@ -66,6 +68,8 @@ def generate_random_signals(
         modality: Modality name ("ser", "fer", "vitals")
         timestamp: Base timestamp for signals
         count: Number of signals to generate
+        bias_emotion: Optional emotion to bias toward ("Happy", "Sad", "Fear", "Angry")
+                     If set, biased emotion has 75% probability, others share 25%
         
     Returns:
         List of ModelSignal objects
@@ -85,12 +89,28 @@ def generate_random_signals(
     # Get valid emotions for this modality
     emotions = VALID_EMOTIONS.get(modality_lower, ["Happy", "Sad", "Angry", "Fear"])
     
+    # Validate bias_emotion is in the valid emotions list
+    if bias_emotion and bias_emotion not in emotions:
+        logger.warning(f"Bias emotion {bias_emotion} not in valid emotions for {modality}, ignoring bias")
+        bias_emotion = None
+    
+    # Create weighted selection if bias is set
+    if bias_emotion:
+        # 75% probability for biased emotion, 25% split among others
+        other_emotions = [e for e in emotions if e != bias_emotion]
+        weights = [0.75] + [0.25 / len(other_emotions)] * len(other_emotions)
+        weighted_emotions = [bias_emotion] + other_emotions
+    else:
+        # Equal probability for all emotions
+        weighted_emotions = emotions
+        weights = [1.0 / len(emotions)] * len(emotions)
+    
     signals = []
     malaysia_tz = get_malaysia_timezone()
     
     for i in range(count):
-        # Random emotion and confidence
-        emotion = random.choice(emotions)
+        # Weighted random emotion selection
+        emotion = random.choices(weighted_emotions, weights=weights, k=1)[0]
         confidence = round(random.uniform(0.5, 0.95), 2)
         
         # Add small time offset for multiple signals
@@ -210,11 +230,16 @@ async def generate_and_send_signals(
     malaysia_tz = get_malaysia_timezone()
     now = datetime.now(malaysia_tz)
     
-    # Generate random signals
-    signals = generate_random_signals(user_id, modality, now, count=count)
+    # Get emotion bias for this modality
+    bias_manager = EmotionBiasManager.get_instance()
+    bias_emotion = bias_manager.get_bias(modality)
     
+    # Generate random signals with bias
+    signals = generate_random_signals(user_id, modality, now, count=count, bias_emotion=bias_emotion)
+    
+    bias_info = f" (bias: {bias_emotion})" if bias_emotion else ""
     logger.info(
-        f"Generated {len(signals)} signals for {modality}: "
+        f"Generated {len(signals)} signals for {modality}{bias_info}: "
         f"{[f'{s.emotion_label}({s.confidence:.2f})' for s in signals]}"
     )
     
@@ -365,4 +390,5 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 

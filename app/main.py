@@ -37,6 +37,7 @@ from .aggregator import Aggregator
 from simulation import api as simulation_api
 from simulation import dashboard as simulation_dashboard
 from simulation.demo_mode import DemoModeManager
+from simulation.generation_interval import GenerationIntervalManager
 from simulation.signal_generator import generate_and_send_signals
 
 # Include SER service routes
@@ -87,17 +88,20 @@ async def health():
 async def auto_signal_generation_task():
     """
     Background task that automatically generates signals when demo mode is enabled.
-    Runs continuously, checking demo mode status every 30 seconds.
+    Runs continuously, checking demo mode status and using configurable interval.
     """
     demo_manager = DemoModeManager.get_instance()
+    interval_manager = GenerationIntervalManager.get_instance()
     user_id = os.getenv("DEV_USER_ID", "8517c97f-66ef-4955-86ed-531013d33d3e")
-    interval = 30  # seconds
     modalities = ["ser", "fer", "vitals"]
     
-    logger.info("Auto signal generation task started (checking demo mode every 30s)")
+    logger.info("Auto signal generation task started")
     
     while True:
         try:
+            # Get current interval from manager (can be changed via dashboard)
+            interval = interval_manager.get_interval()
+            
             if demo_manager.is_enabled():
                 # Generate signals for all modalities
                 for modality in modalities:
@@ -111,11 +115,11 @@ async def auto_signal_generation_task():
                     except Exception as e:
                         logger.warning(f"Error generating {modality} signals: {e}")
                 
-                logger.debug("Auto-generated signals for all modalities (demo mode ON)")
+                logger.debug(f"Auto-generated signals for all modalities (demo mode ON, interval: {interval}s)")
             else:
                 logger.debug("Demo mode OFF, skipping signal generation")
             
-            # Wait before next check
+            # Wait before next check (use current interval setting)
             await asyncio.sleep(interval)
             
         except asyncio.CancelledError:

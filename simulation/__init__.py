@@ -14,6 +14,8 @@ from . import signal_storage
 from . import signal_generator
 from . import api
 from . import dashboard
+from . import emotion_bias
+from . import generation_interval
 
-__all__ = ["config", "demo_mode", "signal_storage", "signal_generator", "api", "dashboard"]
+__all__ = ["config", "demo_mode", "signal_storage", "signal_generator", "api", "dashboard", "emotion_bias", "generation_interval"]
 
