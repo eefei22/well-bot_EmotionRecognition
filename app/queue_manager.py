@@ -14,9 +14,10 @@ from typing import Tuple, Optional, List, Dict
 from datetime import datetime
 
 from app.processing_pipeline import analyze_full
-from app.session_manager import SessionManager
+from app.database import insert_voice_emotion
 from app.models import ChunkResult
 from app.config import settings
+import librosa
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +51,6 @@ class QueueManager:
         self._recent_results: List[Dict] = []  # List of recent ChunkResult dicts
         self._results_lock = threading.Lock()
         self._max_recent_results = 100
-        
-        self.session_manager = SessionManager.get_instance()
         
         # Result log file setup
         self._results_log_file = None
@@ -235,36 +234,58 @@ class QueueManager:
         logger.debug(f"Processing chunk for user {user_id} (file: {audio_file_path})")
         
         try:
-            # Run inference pipeline (stub for now)
+            # Get audio metadata for database insertion
+            try:
+                y, sr = librosa.load(audio_file_path, sr=None, mono=False)
+                duration_sec = len(y) / sr if sr > 0 else 0.0
+                # If stereo, convert to mono length
+                if len(y.shape) > 1:
+                    duration_sec = y.shape[1] / sr if sr > 0 else 0.0
+                
+                audio_metadata = {
+                    "sample_rate": int(sr),
+                    "frame_size_ms": 25.0,  # Default frame size
+                    "frame_stride_ms": 10.0,  # Default frame stride
+                    "duration_sec": duration_sec
+                }
+            except Exception as e:
+                logger.warning(f"Failed to get audio metadata: {e}, using defaults")
+                audio_metadata = {
+                    "sample_rate": 16000,
+                    "frame_size_ms": 25.0,
+                    "frame_stride_ms": 10.0,
+                    "duration_sec": 10.0
+                }
+            
+            # Run inference pipeline
             analysis_result = analyze_full(audio_file_path)
             
-            # Create ChunkResult
-            chunk_result = ChunkResult(
+            # Write directly to database (is_synthetic=False for real audio)
+            db_result = insert_voice_emotion(
+                user_id=user_id,
                 timestamp=timestamp,
-                emotion=analysis_result.get("emotion", "unknown"),
-                emotion_confidence=analysis_result.get("emotion_confidence", 0.0),
-                transcript=analysis_result.get("transcript"),
-                language=analysis_result.get("language"),
-                sentiment=analysis_result.get("sentiment"),
-                sentiment_confidence=analysis_result.get("sentiment_confidence")
+                analysis_result=analysis_result,
+                audio_metadata=audio_metadata,
+                is_synthetic=False
             )
             
-            # Store in SessionManager
-            session_id = self.session_manager.add_result(user_id, chunk_result)
-            
-            logger.info(
-                f"Processed chunk for user {user_id}, session {session_id}: "
-                f"emotion={chunk_result.emotion}, confidence={chunk_result.emotion_confidence:.3f}"
-            )
+            if db_result:
+                logger.info(
+                    f"Processed and stored chunk for user {user_id}: "
+                    f"emotion={analysis_result.get('emotion', 'unknown')}, "
+                    f"confidence={analysis_result.get('emotion_confidence', 0.0):.3f}"
+                )
+            else:
+                logger.warning(f"Failed to write chunk result to database for user {user_id}")
             
             # Prepare result dict for dashboard and logging
             result_dict = {
-                "emotion": chunk_result.emotion,
-                "emotion_confidence": chunk_result.emotion_confidence,
-                "transcript": chunk_result.transcript,
-                "language": chunk_result.language,
-                "sentiment": chunk_result.sentiment,
-                "sentiment_confidence": chunk_result.sentiment_confidence
+                "emotion": analysis_result.get("emotion", "unknown"),
+                "emotion_confidence": analysis_result.get("emotion_confidence", 0.0),
+                "transcript": analysis_result.get("transcript"),
+                "language": analysis_result.get("language"),
+                "sentiment": analysis_result.get("sentiment"),
+                "sentiment_confidence": analysis_result.get("sentiment_confidence")
             }
             
             # Log result to file

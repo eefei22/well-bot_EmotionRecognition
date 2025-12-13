@@ -3,7 +3,7 @@ Dashboard API endpoints for monitoring queue, processing, and results.
 """
 
 from fastapi import APIRouter
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from typing import List, Dict, Optional
 from datetime import datetime
 import logging
@@ -11,8 +11,11 @@ import json
 import os
 
 from app.queue_manager import QueueManager
-from app.session_manager import SessionManager
+from app.database import query_voice_emotion_signals, get_malaysia_timezone, get_last_fusion_timestamp
 from app.config import settings
+from app.aggregation_interval import AggregationIntervalManager
+from datetime import timedelta
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -212,7 +215,15 @@ async def dashboard():
         
         <!-- Right Column Bottom -->
         <div class="column">
-            <h2>Aggregated Results</h2>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h2 style="margin: 0;">Aggregated Results</h2>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <label style="color: #888; font-size: 12px;">Aggregation Interval:</label>
+                    <input type="number" id="aggregationIntervalInput" min="60" max="3600" style="width: 80px; padding: 4px; background: #1a1a1a; border: 1px solid #444; color: #0f0; font-family: monospace; font-size: 12px;" />
+                    <span style="color: #888; font-size: 12px;">seconds</span>
+                    <button onclick="setAggregationInterval()" style="padding: 4px 12px; background: #333; border: 1px solid #555; color: #0f0; cursor: pointer; font-family: monospace; font-size: 12px;">Set</button>
+                </div>
+            </div>
             <ul class="aggregated-list" id="aggregatedList">
                 <li class="empty-message">No aggregated results yet</li>
             </ul>
@@ -417,11 +428,71 @@ async def dashboard():
             }
         }
         
+        // Aggregation interval functions
+        let aggregationIntervalInputFocused = false;
+        
+        async function loadAggregationInterval() {
+            try {
+                const response = await fetch('/ser/api/aggregation-interval');
+                const data = await response.json();
+                const input = document.getElementById('aggregationIntervalInput');
+                if (input && !aggregationIntervalInputFocused) {
+                    input.value = data.interval_seconds || 300;
+                }
+            } catch (error) {
+                console.error('Error loading aggregation interval:', error);
+            }
+        }
+        
+        async function setAggregationInterval() {
+            const input = document.getElementById('aggregationIntervalInput');
+            const interval = parseInt(input.value);
+            
+            if (isNaN(interval) || interval < 60 || interval > 3600) {
+                alert('Interval must be between 60 and 3600 seconds');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/ser/api/aggregation-interval', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({interval_seconds: interval})
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('Aggregation interval set to', data.interval_seconds, 'seconds');
+                } else {
+                    const error = await response.json();
+                    alert('Error: ' + error.error);
+                }
+            } catch (error) {
+                console.error('Error setting aggregation interval:', error);
+                alert('Failed to set aggregation interval');
+            }
+        }
+        
+        // Track input focus state
+        document.addEventListener('DOMContentLoaded', function() {
+            const input = document.getElementById('aggregationIntervalInput');
+            if (input) {
+                input.addEventListener('focus', () => {
+                    aggregationIntervalInputFocused = true;
+                });
+                input.addEventListener('blur', () => {
+                    aggregationIntervalInputFocused = false;
+                });
+            }
+        });
+        
         // Initial load
         fetchDashboardData();
+        loadAggregationInterval();
         
         // Poll every 2 seconds
         setInterval(fetchDashboardData, 2000);
+        setInterval(loadAggregationInterval, 2000);
     </script>
 </body>
 </html>
@@ -431,13 +502,15 @@ async def dashboard():
 
 def _read_aggregated_results(limit: int = 100) -> List[Dict]:
     """
-    Read aggregated results from the log file.
+    Read aggregated results from the log file and filter by fusion timestamp.
+    
+    Only returns aggregated results that occurred after the last Fusion run for each user.
     
     Args:
         limit: Maximum number of results to return
         
     Returns:
-        List of aggregated result dictionaries
+        List of aggregated result dictionaries (filtered by fusion timestamp)
     """
     log_file = os.path.join(settings.AGGREGATION_LOG_DIR, "aggregation_log.jsonl")
     
@@ -463,8 +536,56 @@ def _read_aggregated_results(limit: int = 100) -> List[Dict]:
         # Sort by timestamp (newest first)
         aggregated_results.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
         
-        # Return last N results
-        return aggregated_results[:limit]
+        # Filter by fusion timestamp per user
+        # Extract unique user_ids
+        user_ids = set(entry.get("user_id") for entry in aggregated_results if entry.get("user_id"))
+        
+        # Get last Fusion timestamps for all users
+        last_fusion_timestamps = {}
+        for user_id in user_ids:
+            try:
+                last_fusion_timestamp = get_last_fusion_timestamp(user_id)
+                if last_fusion_timestamp is not None:
+                    last_fusion_timestamps[user_id] = last_fusion_timestamp
+            except Exception as e:
+                logger.debug(f"Failed to get last Fusion timestamp for user {user_id}: {e}")
+                # Continue without filtering for this user if query fails
+        
+        # Filter aggregated results: only include entries after last Fusion run
+        filtered_results = []
+        malaysia_tz = get_malaysia_timezone()
+        
+        for entry in aggregated_results:
+            user_id = entry.get("user_id", "")
+            entry_timestamp_str = entry.get("timestamp", "")
+            
+            if not entry_timestamp_str:
+                continue
+            
+            # Parse entry timestamp
+            try:
+                entry_timestamp = datetime.fromisoformat(entry_timestamp_str.replace('Z', '+00:00'))
+                if entry_timestamp.tzinfo is None:
+                    entry_timestamp = entry_timestamp.replace(tzinfo=malaysia_tz)
+                else:
+                    entry_timestamp = entry_timestamp.astimezone(malaysia_tz)
+            except Exception as e:
+                logger.debug(f"Failed to parse timestamp {entry_timestamp_str}: {e}")
+                # Include entry if timestamp parsing fails (graceful fallback)
+                filtered_results.append(entry)
+                continue
+            
+            # Filter: only include if no Fusion run exists OR entry is after last Fusion run
+            if user_id and user_id in last_fusion_timestamps:
+                last_fusion_ts = last_fusion_timestamps[user_id]
+                if entry_timestamp <= last_fusion_ts:
+                    # Entry was already processed by Fusion, skip it
+                    continue
+            
+            filtered_results.append(entry)
+        
+        # Return last N filtered results
+        return filtered_results[:limit]
         
     except Exception as e:
         logger.error(f"Error reading aggregated results from {log_file}: {e}", exc_info=True)
@@ -476,7 +597,6 @@ async def get_dashboard_status():
     """Get current dashboard status (queue, processing, results, aggregated)."""
     try:
         queue_manager = QueueManager.get_instance()
-        session_manager = SessionManager.get_instance()
         
         # Get queue status
         queue_size = queue_manager.get_queue_size()
@@ -489,40 +609,74 @@ async def get_dashboard_status():
         # Get recent results from QueueManager (most recent processing results)
         recent_results = queue_manager.get_recent_results(limit=50)
         
-        # Also get results from SessionManager (for completeness)
-        all_results = []
-        all_user_ids = list(session_manager._sessions.keys())
-        
-        for user_id in all_user_ids:
-            sessions = session_manager.get_all_sessions(user_id)
-            for session_id, chunk_results in sessions.items():
-                # Get last 20 results from this session
-                recent_session_results = chunk_results[-20:] if len(chunk_results) > 20 else chunk_results
-                for result in recent_session_results:
-                    all_results.append({
-                        "user_id": user_id,
-                        "timestamp": result.timestamp.isoformat(),
-                        "emotion": result.emotion,
-                        "emotion_confidence": result.emotion_confidence,
-                        "sentiment": result.sentiment,
-                        "sentiment_confidence": result.sentiment_confidence,
-                        "transcript": result.transcript,
-                        "language": result.language
-                    })
-        
-        # Combine and deduplicate results (prefer QueueManager results as they're more recent)
-        # Create a set of (user_id, timestamp) tuples to track seen results
-        seen_results = {(r["user_id"], r["timestamp"]) for r in recent_results}
-        
-        # Add SessionManager results that aren't already in recent_results
-        for result in all_results:
-            key = (result["user_id"], result["timestamp"])
-            if key not in seen_results:
-                recent_results.append(result)
-                seen_results.add(key)
+        # Also query database for recent voice emotion records (last 24 hours)
+        # This supplements QueueManager results with data that may have been written directly
+        try:
+            malaysia_tz = get_malaysia_timezone()
+            now = datetime.now(malaysia_tz)
+            start_time = now - timedelta(hours=24)
+            
+            # Get all unique user_ids from QueueManager results
+            user_ids = set(r.get("user_id") for r in recent_results if r.get("user_id"))
+            
+            # If no user_ids from QueueManager, query for any recent records
+            if not user_ids:
+                # Query database for any recent records (we'll need to get user_ids from somewhere)
+                # For now, we'll rely on QueueManager results and database will be queried per-user as needed
+                pass
+            else:
+                # Query database for each user
+                db_results = []
+                for user_id in user_ids:
+                    try:
+                        # Get last Fusion timestamp to filter out already-processed signals
+                        last_fusion_timestamp = get_last_fusion_timestamp(user_id)
+                        
+                        signals = query_voice_emotion_signals(
+                            user_id=user_id,
+                            start_time=start_time,
+                            end_time=now,
+                            include_synthetic=True
+                        )
+                        # Convert signals to result format and filter by last Fusion timestamp
+                        for signal in signals:
+                            # Parse timestamp
+                            signal_timestamp = datetime.fromisoformat(signal["timestamp"].replace('Z', '+00:00'))
+                            
+                            # Filter: only include signals after last Fusion run
+                            if last_fusion_timestamp is not None:
+                                if signal_timestamp <= last_fusion_timestamp:
+                                    # Signal was already processed by Fusion, skip it
+                                    continue
+                            
+                            db_results.append({
+                                "user_id": user_id,
+                                "timestamp": signal_timestamp.isoformat(),
+                                "emotion": signal["emotion_label"].lower()[:3] if len(signal["emotion_label"].lower()) >= 3 else signal["emotion_label"].lower(),  # Convert back to SER format
+                                "emotion_confidence": signal["confidence"],
+                                "sentiment": None,  # Not available from signal
+                                "sentiment_confidence": None,
+                                "transcript": None,  # Not available from signal
+                                "language": None
+                            })
+                    except Exception as e:
+                        logger.warning(f"Failed to query database for user {user_id}: {e}")
+                        continue
+                
+                # Combine and deduplicate results (prefer QueueManager results as they're more recent)
+                seen_results = {(r["user_id"], r["timestamp"]) for r in recent_results}
+                
+                # Add database results that aren't already in recent_results
+                for result in db_results:
+                    key = (result["user_id"], result["timestamp"])
+                    if key not in seen_results:
+                        recent_results.append(result)
+                        seen_results.add(key)
+        except Exception as e:
+            logger.warning(f"Failed to query database for dashboard results: {e}")
         
         # Sort by timestamp (newest first)
-        recent_results.sort(key=lambda x: x["timestamp"], reverse=True)
+        recent_results.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
         
         # Return last 50 results
         recent_results = recent_results[:50]
@@ -548,5 +702,45 @@ async def get_dashboard_status():
             "aggregated": [],
             "error": str(e)
         }
+
+
+class AggregationIntervalRequest(BaseModel):
+    """Request model for setting aggregation interval."""
+    interval_seconds: int
+
+
+@router.get("/api/aggregation-interval")
+async def get_aggregation_interval():
+    """Get current aggregation interval."""
+    try:
+        manager = AggregationIntervalManager.get_instance()
+        return manager.get_status()
+    except Exception as e:
+        logger.error(f"Error getting aggregation interval: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Internal server error: {str(e)}"}
+        )
+
+
+@router.post("/api/aggregation-interval")
+async def set_aggregation_interval(request: AggregationIntervalRequest):
+    """Set aggregation interval."""
+    try:
+        manager = AggregationIntervalManager.get_instance()
+        manager.set_interval(request.interval_seconds)
+        return {"status": "success", "interval_seconds": request.interval_seconds}
+    except ValueError as e:
+        logger.warning(f"Invalid aggregation interval: {e}")
+        return JSONResponse(
+            status_code=400,
+            content={"error": str(e)}
+        )
+    except Exception as e:
+        logger.error(f"Error setting aggregation interval: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Internal server error: {str(e)}"}
+        )
 
 

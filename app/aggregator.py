@@ -17,6 +17,7 @@ from collections import defaultdict
 from app.session_manager import SessionManager
 from app.models import ChunkResult, AggregatedResult
 from app.config import settings
+from app.aggregation_interval import AggregationIntervalManager
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,10 @@ class Aggregator:
     def __init__(self):
         """Initialize Aggregator (singleton pattern)."""
         self.session_manager = SessionManager.get_instance()
-        self.aggregation_window = timedelta(seconds=settings.AGGREGATION_WINDOW_SECONDS)
+        self.interval_manager = AggregationIntervalManager.get_instance()
+        # Get initial interval from manager (defaults to settings if not set)
+        initial_interval = self.interval_manager.get_interval()
+        self.aggregation_window = timedelta(seconds=initial_interval)
         self.log_dir = settings.AGGREGATION_LOG_DIR
         
         # Ensure log directory exists
@@ -44,7 +48,7 @@ class Aggregator:
         
         logger.info(
             f"Aggregator initialized "
-            f"(window: {settings.AGGREGATION_WINDOW_SECONDS}s, log_dir: {self.log_dir})"
+            f"(window: {initial_interval}s, log_dir: {self.log_dir})"
         )
     
     @classmethod
@@ -91,11 +95,18 @@ class Aggregator:
         
         self.timer_thread = None
     
+    def update_interval(self):
+        """Update aggregation window from interval manager."""
+        new_interval = self.interval_manager.get_interval()
+        self.aggregation_window = timedelta(seconds=new_interval)
+        logger.debug(f"Aggregator interval updated to {new_interval}s")
+    
     def _periodic_loop(self):
         """Periodic loop that runs aggregation every N seconds."""
         logger.info("Aggregator periodic loop started")
         
         # Wait for initial window before first aggregation
+        self.update_interval()  # Get current interval
         time.sleep(self.aggregation_window.total_seconds())
         
         while True:
@@ -104,12 +115,15 @@ class Aggregator:
                     break
             
             try:
+                # Update interval from manager (allows dynamic changes)
+                self.update_interval()
+                
                 # Run aggregation
                 self.run_aggregation()
             except Exception as e:
                 logger.error(f"Error in periodic aggregation: {e}", exc_info=True)
             
-            # Wait for next aggregation window
+            # Wait for next aggregation window (uses updated interval)
             time.sleep(self.aggregation_window.total_seconds())
         
         logger.info("Aggregator periodic loop ended")

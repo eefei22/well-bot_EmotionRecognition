@@ -12,10 +12,12 @@ from typing import List, Optional
 from pydantic import BaseModel
 
 from app.models import PredictRequest, ModelPredictResponse, ModelSignal
-from .signal_storage import SignalStorage
+from app.database import insert_voice_emotion, insert_face_emotion_synthetic, insert_vitals_emotion_synthetic, get_malaysia_timezone
+from datetime import datetime
 from .demo_mode import DemoModeManager
 from .emotion_bias import EmotionBiasManager
 from .generation_interval import GenerationIntervalManager
+from .modality_toggle import ModalityToggleManager
 
 logger = logging.getLogger(__name__)
 
@@ -44,166 +46,7 @@ class GenerationIntervalRequest(BaseModel):
     interval: int  # Interval in seconds
 
 
-@router.post("/ser/predict", response_model=ModelPredictResponse)
-async def predict_ser(
-    request: PredictRequest,
-    clear: bool = Query(default=True, description="Clear signals after reading")
-):
-    """
-    Read SER signals from JSONL file within a time window.
-    
-    Args:
-        request: PredictRequest with user_id, snapshot_timestamp, window_seconds
-        clear: Whether to clear signals after reading (default: True)
-    
-    Returns:
-        ModelPredictResponse with signals in the time window
-    """
-    try:
-        logger.info(
-            f"POST /simulation/ser/predict - Request for user {request.user_id} "
-            f"(window: {request.window_seconds}s)"
-        )
-        
-        # Parse timestamp
-        snapshot_dt = datetime.fromisoformat(
-            request.snapshot_timestamp.replace("Z", "+00:00")
-        )
-        window_start = snapshot_dt - timedelta(seconds=request.window_seconds)
-        window_end = snapshot_dt
-        
-        # Read signals from storage
-        storage = SignalStorage.get_instance()
-        signals = storage.read_signals_in_window(
-            "ser",
-            request.user_id,
-            window_start,
-            window_end
-        )
-        
-        logger.info(
-            f"POST /simulation/ser/predict - Returning {len(signals)} signals "
-            f"for user {request.user_id}"
-        )
-        
-        # Clear signals if requested
-        if clear and signals:
-            storage.clear_signals("ser")
-            logger.info("Cleared SER signals after reading")
-        
-        return ModelPredictResponse(signals=signals)
-    
-    except Exception as e:
-        logger.error(f"Error in /simulation/ser/predict: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
-
-
-@router.post("/fer/predict", response_model=ModelPredictResponse)
-async def predict_fer(
-    request: PredictRequest,
-    clear: bool = Query(default=True, description="Clear signals after reading")
-):
-    """
-    Read FER signals from JSONL file within a time window.
-    
-    Args:
-        request: PredictRequest with user_id, snapshot_timestamp, window_seconds
-        clear: Whether to clear signals after reading (default: True)
-    
-    Returns:
-        ModelPredictResponse with signals in the time window
-    """
-    try:
-        logger.info(
-            f"POST /simulation/fer/predict - Request for user {request.user_id} "
-            f"(window: {request.window_seconds}s)"
-        )
-        
-        # Parse timestamp
-        snapshot_dt = datetime.fromisoformat(
-            request.snapshot_timestamp.replace("Z", "+00:00")
-        )
-        window_start = snapshot_dt - timedelta(seconds=request.window_seconds)
-        window_end = snapshot_dt
-        
-        # Read signals from storage
-        storage = SignalStorage.get_instance()
-        signals = storage.read_signals_in_window(
-            "fer",
-            request.user_id,
-            window_start,
-            window_end
-        )
-        
-        logger.info(
-            f"POST /simulation/fer/predict - Returning {len(signals)} signals "
-            f"for user {request.user_id}"
-        )
-        
-        # Clear signals if requested
-        if clear and signals:
-            storage.clear_signals("fer")
-            logger.info("Cleared FER signals after reading")
-        
-        return ModelPredictResponse(signals=signals)
-    
-    except Exception as e:
-        logger.error(f"Error in /simulation/fer/predict: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
-
-
-@router.post("/vitals/predict", response_model=ModelPredictResponse)
-async def predict_vitals(
-    request: PredictRequest,
-    clear: bool = Query(default=True, description="Clear signals after reading")
-):
-    """
-    Read Vitals signals from JSONL file within a time window.
-    
-    Args:
-        request: PredictRequest with user_id, snapshot_timestamp, window_seconds
-        clear: Whether to clear signals after reading (default: True)
-    
-    Returns:
-        ModelPredictResponse with signals in the time window
-    """
-    try:
-        logger.info(
-            f"POST /simulation/vitals/predict - Request for user {request.user_id} "
-            f"(window: {request.window_seconds}s)"
-        )
-        
-        # Parse timestamp
-        snapshot_dt = datetime.fromisoformat(
-            request.snapshot_timestamp.replace("Z", "+00:00")
-        )
-        window_start = snapshot_dt - timedelta(seconds=request.window_seconds)
-        window_end = snapshot_dt
-        
-        # Read signals from storage
-        storage = SignalStorage.get_instance()
-        signals = storage.read_signals_in_window(
-            "vitals",
-            request.user_id,
-            window_start,
-            window_end
-        )
-        
-        logger.info(
-            f"POST /simulation/vitals/predict - Returning {len(signals)} signals "
-            f"for user {request.user_id}"
-        )
-        
-        # Clear signals if requested
-        if clear and signals:
-            storage.clear_signals("vitals")
-            logger.info("Cleared Vitals signals after reading")
-        
-        return ModelPredictResponse(signals=signals)
-    
-    except Exception as e:
-        logger.error(f"Error in /simulation/vitals/predict: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+# Note: /simulation/{modality}/predict endpoints removed - Fusion service now queries database directly
 
 
 @router.get("/demo-mode")
@@ -376,13 +219,72 @@ async def inject_signals(request: InjectSignalsRequest):
                 detail=f"Invalid modality: {modality}. Must be 'ser', 'fer', or 'vitals'"
             )
         
-        # Write signals to storage
-        storage = SignalStorage.get_instance()
+        # Write signals directly to database
+        success_count = 0
         for signal in request.signals:
-            storage.write_signal(modality, signal)
+            # Parse timestamp from ISO string
+            signal_timestamp = datetime.fromisoformat(signal.timestamp.replace('Z', '+00:00'))
+            malaysia_tz = get_malaysia_timezone()
+            if signal_timestamp.tzinfo is None:
+                signal_timestamp = signal_timestamp.replace(tzinfo=malaysia_tz)
+            else:
+                signal_timestamp = signal_timestamp.astimezone(malaysia_tz)
+            
+            if modality == "ser":
+                # Map fusion emotion back to SER emotion format
+                emotion_map = {
+                    "Happy": "hap",
+                    "Sad": "sad",
+                    "Angry": "ang",
+                    "Fear": "fea"
+                }
+                ser_emotion = emotion_map.get(signal.emotion_label, signal.emotion_label.lower()[:3])
+                analysis_result = {
+                    "emotion": ser_emotion,
+                    "emotion_confidence": signal.confidence,
+                    "transcript": None,
+                    "language": None,
+                    "sentiment": None,
+                    "sentiment_confidence": None
+                }
+                audio_metadata = {
+                    "sample_rate": 16000,
+                    "frame_size_ms": 25.0,
+                    "frame_stride_ms": 10.0,
+                    "duration_sec": 10.0
+                }
+                result = insert_voice_emotion(
+                    user_id=signal.user_id,
+                    timestamp=signal_timestamp,
+                    analysis_result=analysis_result,
+                    audio_metadata=audio_metadata,
+                    is_synthetic=True
+                )
+                if result:
+                    success_count += 1
+            elif modality == "fer":
+                result = insert_face_emotion_synthetic(
+                    user_id=signal.user_id,
+                    timestamp=signal_timestamp,
+                    emotion_label=signal.emotion_label,
+                    confidence=signal.confidence,
+                    is_synthetic=True
+                )
+                if result:
+                    success_count += 1
+            elif modality == "vitals":
+                result = insert_vitals_emotion_synthetic(
+                    user_id=signal.user_id,
+                    timestamp=signal_timestamp,
+                    emotion_label=signal.emotion_label,
+                    confidence=signal.confidence,
+                    is_synthetic=True
+                )
+                if result:
+                    success_count += 1
         
         logger.info(
-            f"Injected {len(request.signals)} signals for {modality} modality"
+            f"Injected {success_count}/{len(request.signals)} signals to database for {modality} modality"
         )
         
         return {
@@ -395,6 +297,54 @@ async def inject_signals(request: InjectSignalsRequest):
         raise
     except Exception as e:
         logger.error(f"Error injecting signals: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@router.get("/modality-toggle")
+async def get_modality_toggles():
+    """
+    Get current modality toggle states.
+    
+    Returns:
+        Dictionary with enabled state for each modality
+    """
+    try:
+        toggle_manager = ModalityToggleManager.get_instance()
+        return toggle_manager.get_status()
+    except Exception as e:
+        logger.error(f"Error getting modality toggles: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@router.post("/modality-toggle")
+async def set_modality_toggle(request: dict):
+    """
+    Set modality generation toggle state.
+    
+    Args:
+        request: Dictionary with 'modality' and 'enabled' keys
+    
+    Returns:
+        Updated toggle state
+    """
+    try:
+        modality = request.get("modality", "").lower()
+        enabled = request.get("enabled", False)
+        
+        if modality not in ["ser", "fer", "vitals"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid modality: {modality}. Must be 'ser', 'fer', or 'vitals'"
+            )
+        
+        toggle_manager = ModalityToggleManager.get_instance()
+        toggle_manager.set_enabled(modality, enabled)
+        
+        return toggle_manager.get_status()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error setting modality toggle: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 

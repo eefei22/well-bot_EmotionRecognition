@@ -26,10 +26,12 @@ import httpx
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.models import ModelSignal
+from app.database import insert_voice_emotion, insert_face_emotion_synthetic, insert_vitals_emotion_synthetic
 from simulation.config import MODALITY_MAP, VALID_EMOTIONS, DEFAULT_GENERATION_INTERVAL, DEFAULT_SIGNAL_COUNT
-from simulation.signal_storage import SignalStorage
 from simulation.demo_mode import DemoModeManager
 from simulation.emotion_bias import EmotionBiasManager
+from simulation.modality_toggle import ModalityToggleManager
+from simulation.user_id import UserIdManager
 
 # Setup logging
 logging.basicConfig(
@@ -196,26 +198,98 @@ def write_signals_locally(
     signals: List[ModelSignal]
 ) -> None:
     """
-    Write signals to local JSONL file.
+    Write signals directly to database tables.
     
     Args:
         modality: Modality name ("ser", "fer", "vitals")
         signals: List of ModelSignal objects to write
     """
     try:
-        storage = SignalStorage.get_instance()
+        modality_lower = modality.lower()
+        success_count = 0
+        
         for signal in signals:
-            storage.write_signal(modality, signal)
-        logger.info(f"Successfully wrote {len(signals)} signals locally ({modality})")
+            # Parse timestamp from ISO string
+            signal_timestamp = datetime.fromisoformat(signal.timestamp.replace('Z', '+00:00'))
+            malaysia_tz = get_malaysia_timezone()
+            if signal_timestamp.tzinfo is None:
+                signal_timestamp = signal_timestamp.replace(tzinfo=malaysia_tz)
+            else:
+                signal_timestamp = signal_timestamp.astimezone(malaysia_tz)
+            
+            if modality_lower == "ser":
+                # Write to voice_emotion table
+                # Create analysis_result dict from ModelSignal
+                analysis_result = {
+                    "emotion": signal.emotion_label.lower()[:3] if len(signal.emotion_label.lower()) >= 3 else signal.emotion_label.lower(),  # Convert "Happy" -> "hap", etc.
+                    "emotion_confidence": signal.confidence,
+                    "transcript": None,
+                    "language": None,
+                    "sentiment": None,
+                    "sentiment_confidence": None
+                }
+                # Map fusion emotion back to SER emotion format
+                emotion_map = {
+                    "Happy": "hap",
+                    "Sad": "sad",
+                    "Angry": "ang",
+                    "Fear": "fea"
+                }
+                analysis_result["emotion"] = emotion_map.get(signal.emotion_label, signal.emotion_label.lower()[:3])
+                
+                audio_metadata = {
+                    "sample_rate": 16000,
+                    "frame_size_ms": 25.0,
+                    "frame_stride_ms": 10.0,
+                    "duration_sec": 10.0
+                }
+                
+                result = insert_voice_emotion(
+                    user_id=signal.user_id,
+                    timestamp=signal_timestamp,
+                    analysis_result=analysis_result,
+                    audio_metadata=audio_metadata,
+                    is_synthetic=True
+                )
+                if result:
+                    success_count += 1
+                    
+            elif modality_lower == "fer":
+                # Write to face_emotion table
+                result = insert_face_emotion_synthetic(
+                    user_id=signal.user_id,
+                    timestamp=signal_timestamp,
+                    emotion_label=signal.emotion_label,
+                    confidence=signal.confidence,
+                    is_synthetic=True
+                )
+                if result:
+                    success_count += 1
+                    
+            elif modality_lower == "vitals":
+                # Write to bvs_emotion table
+                result = insert_vitals_emotion_synthetic(
+                    user_id=signal.user_id,
+                    timestamp=signal_timestamp,
+                    emotion_label=signal.emotion_label,
+                    confidence=signal.confidence,
+                    is_synthetic=True
+                )
+                if result:
+                    success_count += 1
+            else:
+                logger.warning(f"Unknown modality: {modality}")
+        
+        logger.info(f"Successfully wrote {success_count}/{len(signals)} signals to database ({modality})")
     except Exception as e:
-        logger.error(f"Error writing signals locally: {e}", exc_info=True)
+        logger.error(f"Error writing signals to database: {e}", exc_info=True)
         raise
 
 
 async def generate_and_send_signals(
     modality: str,
-    user_id: str,
-    count: int,
+    user_id: Optional[str] = None,
+    count: int = DEFAULT_SIGNAL_COUNT,
     cloud_url: Optional[str] = None
 ) -> None:
     """
@@ -223,10 +297,15 @@ async def generate_and_send_signals(
     
     Args:
         modality: Modality name ("ser", "fer", "vitals")
-        user_id: User ID for signals
+        user_id: User ID for signals (if None, uses UserIdManager)
         count: Number of signals to generate
         cloud_url: Optional cloud URL to send to (if None, writes locally)
     """
+    # Get user_id from UserIdManager if not provided
+    if user_id is None:
+        user_id_manager = UserIdManager.get_instance()
+        user_id = user_id_manager.get_user_id()
+    
     malaysia_tz = get_malaysia_timezone()
     now = datetime.now(malaysia_tz)
     
@@ -283,9 +362,13 @@ async def continuous_generation_loop(
                     await asyncio.sleep(interval)
                     continue
             
-            # Generate signals for each modality
+            # Generate signals for each modality (only if enabled)
+            toggle_manager = ModalityToggleManager.get_instance()
             for modality in modalities:
-                await generate_and_send_signals(modality, user_id, count, cloud_url)
+                if toggle_manager.is_enabled(modality):
+                    await generate_and_send_signals(modality, user_id, count, cloud_url)
+                else:
+                    logger.debug(f"Skipping {modality} generation (disabled)")
             
             # Wait for next interval
             logger.debug(f"Waiting {interval} seconds until next generation...")

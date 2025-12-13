@@ -10,10 +10,14 @@ import logging
 from datetime import datetime
 from typing import Dict, List
 
-from .signal_storage import SignalStorage
 from .demo_mode import DemoModeManager
 from .emotion_bias import EmotionBiasManager
 from .generation_interval import GenerationIntervalManager
+from .modality_toggle import ModalityToggleManager
+from .user_id import UserIdManager
+from app.database import _get_supabase_client, get_malaysia_timezone, get_last_fusion_timestamp
+from datetime import datetime, timedelta
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +153,39 @@ async def dashboard():
             border-top: 1px solid #333;
         }
         
+        .interval-controls-row {
+            display: flex;
+            gap: 30px;
+            align-items: flex-start;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #333;
+        }
+        
+        .interval-controls-row .interval-control {
+            margin-top: 0;
+            padding-top: 0;
+            border-top: none;
+            flex: 1;
+        }
+        
+        .modality-controls {
+            display: flex;
+            gap: 30px;
+            align-items: center;
+        }
+        
+        .modality-control-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .modality-control-item label:first-child {
+            color: #aaa;
+            min-width: 60px;
+        }
+        
         .interval-control-label {
             color: #aaa;
             font-size: 0.9em;
@@ -228,6 +265,21 @@ async def dashboard():
             top: 0;
             background-color: #111;
             z-index: 10;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .column h2 .modality-toggle-inline {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .column h2 .modality-toggle-inline label:first-child {
+            color: #aaa;
+            font-size: 0.8em;
+            margin-right: 5px;
         }
         
         .stat-item {
@@ -392,21 +444,43 @@ async def dashboard():
                 When enabled, Fusion will use simulation endpoints and signal generator will generate signals.
             </span>
         </div>
-        <div class="interval-control">
-            <span class="interval-control-label">Generation Interval:</span>
-            <div class="interval-input-group">
-                <input type="number" id="intervalInput" class="interval-input" min="5" max="300" value="30" 
-                       onfocus="intervalInputFocused = true" 
-                       onblur="intervalInputFocused = false">
-                <span class="interval-unit">seconds</span>
-                <button class="interval-button" onclick="setGenerationInterval()">Set</button>
+        <div class="interval-controls-row">
+            <div class="interval-control">
+                <span class="interval-control-label">Generation Interval:</span>
+                <div class="interval-input-group">
+                    <input type="number" id="intervalInput" class="interval-input" min="5" max="300" value="30" 
+                           onfocus="intervalInputFocused = true" 
+                           onblur="intervalInputFocused = false">
+                    <span class="interval-unit">seconds</span>
+                    <button class="interval-button" onclick="setGenerationInterval()">Set</button>
+                </div>
+            </div>
+            
+            <div class="interval-control">
+                <span class="interval-control-label">User UUID:</span>
+                <div class="interval-input-group">
+                    <input type="text" id="userIdInput" class="interval-input" style="width: 300px;" placeholder="Enter user UUID" 
+                           onfocus="userIdInputFocused = true" 
+                           onblur="userIdInputFocused = false">
+                    <button class="interval-button" onclick="setUserId()">Set</button>
+                </div>
             </div>
         </div>
+        
     </div>
     
     <div class="container">
         <div class="column">
-            <h2>SER Signals</h2>
+            <h2>
+                SER Signals
+                <span class="modality-toggle-inline">
+                    <label>SER:</label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="serToggle" onchange="toggleModality('ser', this.checked)">
+                        <span class="slider"></span>
+                    </label>
+                </span>
+            </h2>
             <div class="bias-selector">
                 <span class="bias-selector-label">Emotion Bias:</span>
                 <div class="bias-buttons" id="serBiasButtons">
@@ -418,16 +492,12 @@ async def dashboard():
                 </div>
             </div>
             <div class="stat-item">
-                <span class="stat-label">Signal Count:</span>
+                <span class="stat-label">Database Records:</span>
                 <span class="stat-value" id="serCount">0</span>
             </div>
             <div class="stat-item">
-                <span class="stat-label">File Size:</span>
-                <span class="stat-value" id="serSize">0 bytes</span>
-            </div>
-            <div class="stat-item">
-                <span class="stat-label">Last Modified:</span>
-                <span class="stat-value" id="serModified">-</span>
+                <span class="stat-label">Last Signal:</span>
+                <span class="stat-value" id="serLastSignal">-</span>
             </div>
             <div class="signals-list" id="serSignals">
                 <div class="empty-message">No signals yet</div>
@@ -435,7 +505,16 @@ async def dashboard():
         </div>
         
         <div class="column">
-            <h2>FER Signals</h2>
+            <h2>
+                FER Signals
+                <span class="modality-toggle-inline">
+                    <label>FER:</label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="ferToggle" onchange="toggleModality('fer', this.checked)">
+                        <span class="slider"></span>
+                    </label>
+                </span>
+            </h2>
             <div class="bias-selector">
                 <span class="bias-selector-label">Emotion Bias:</span>
                 <div class="bias-buttons" id="ferBiasButtons">
@@ -447,16 +526,12 @@ async def dashboard():
                 </div>
             </div>
             <div class="stat-item">
-                <span class="stat-label">Signal Count:</span>
+                <span class="stat-label">Database Records:</span>
                 <span class="stat-value" id="ferCount">0</span>
             </div>
             <div class="stat-item">
-                <span class="stat-label">File Size:</span>
-                <span class="stat-value" id="ferSize">0 bytes</span>
-            </div>
-            <div class="stat-item">
-                <span class="stat-label">Last Modified:</span>
-                <span class="stat-value" id="ferModified">-</span>
+                <span class="stat-label">Last Signal:</span>
+                <span class="stat-value" id="ferLastSignal">-</span>
             </div>
             <div class="signals-list" id="ferSignals">
                 <div class="empty-message">No signals yet</div>
@@ -464,7 +539,16 @@ async def dashboard():
         </div>
         
         <div class="column">
-            <h2>Vitals Signals</h2>
+            <h2>
+                Vitals Signals
+                <span class="modality-toggle-inline">
+                    <label>Vitals:</label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="vitalsToggle" onchange="toggleModality('vitals', this.checked)">
+                        <span class="slider"></span>
+                    </label>
+                </span>
+            </h2>
             <div class="bias-selector">
                 <span class="bias-selector-label">Emotion Bias:</span>
                 <div class="bias-buttons" id="vitalsBiasButtons">
@@ -476,16 +560,12 @@ async def dashboard():
                 </div>
             </div>
             <div class="stat-item">
-                <span class="stat-label">Signal Count:</span>
+                <span class="stat-label">Database Records:</span>
                 <span class="stat-value" id="vitalsCount">0</span>
             </div>
             <div class="stat-item">
-                <span class="stat-label">File Size:</span>
-                <span class="stat-value" id="vitalsSize">0 bytes</span>
-            </div>
-            <div class="stat-item">
-                <span class="stat-label">Last Modified:</span>
-                <span class="stat-value" id="vitalsModified">-</span>
+                <span class="stat-label">Last Signal:</span>
+                <span class="stat-value" id="vitalsLastSignal">-</span>
             </div>
             <div class="signals-list" id="vitalsSignals">
                 <div class="empty-message">No signals yet</div>
@@ -640,6 +720,49 @@ async def dashboard():
             });
         }
         
+        // Toggle modality generation
+        async function toggleModality(modality, enabled) {
+            try {
+                const response = await fetch('/simulation/modality-toggle', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        modality: modality,
+                        enabled: enabled
+                    })
+                });
+                
+                const data = await response.json();
+                updateModalityStatus(modality, enabled);
+            } catch (error) {
+                console.error(`Error toggling ${modality} modality:`, error);
+                // Revert checkbox state on error
+                document.getElementById(modality + 'Toggle').checked = !enabled;
+            }
+        }
+        
+        // Update modality status display (toggle switch already shows state)
+        function updateModalityStatus(modality, enabled) {
+            // Toggle switch checkbox state is already updated, no need for separate status display
+        }
+        
+        // Load modality toggle states
+        async function loadModalityToggles() {
+            try {
+                const response = await fetch('/simulation/modality-toggle');
+                const data = await response.json();
+                
+                // Update checkboxes
+                document.getElementById('serToggle').checked = data.ser || false;
+                document.getElementById('ferToggle').checked = data.fer || false;
+                document.getElementById('vitalsToggle').checked = data.vitals || false;
+            } catch (error) {
+                console.error('Error loading modality toggles:', error);
+            }
+        }
+        
         // Toggle demo mode
         async function toggleDemoMode() {
             const checkbox = document.getElementById('demoModeToggle');
@@ -697,19 +820,25 @@ async def dashboard():
         // Update signals display
         function updateSignalsDisplay(modality, data) {
             const countEl = document.getElementById(modality + 'Count');
-            const sizeEl = document.getElementById(modality + 'Size');
-            const modifiedEl = document.getElementById(modality + 'Modified');
+            const lastSignalEl = document.getElementById(modality + 'LastSignal');
             const signalsEl = document.getElementById(modality + 'Signals');
             
             countEl.textContent = data.count || 0;
-            sizeEl.textContent = formatFileSize(data.file_status?.size || 0);
-            modifiedEl.textContent = formatTimestamp(data.file_status?.last_modified);
+            
+            // Update last signal timestamp
+            if (data.recent_signals && data.recent_signals.length > 0) {
+                const lastSignal = data.recent_signals[0];
+                lastSignalEl.textContent = formatTimestamp(lastSignal.timestamp);
+            } else {
+                lastSignalEl.textContent = '-';
+            }
             
             // Update signals list
             if (data.recent_signals && data.recent_signals.length > 0) {
                 signalsEl.innerHTML = data.recent_signals.map(signal => `
                     <div class="signal-item">
                         <div class="emotion">${signal.emotion_label} (${(signal.confidence * 100).toFixed(1)}%)</div>
+                        <div class="confidence">User: ${signal.user_id ? signal.user_id.substring(0, 8) + '...' : 'N/A'}</div>
                         <div class="timestamp">${formatTimestamp(signal.timestamp)}</div>
                     </div>
                 `).join('');
@@ -735,10 +864,57 @@ async def dashboard():
             }
         }
         
+        // User ID functions
+        let userIdInputFocused = false;
+        
+        async function loadUserId() {
+            try {
+                const response = await fetch('/simulation/user-id');
+                const data = await response.json();
+                const input = document.getElementById('userIdInput');
+                if (input && !userIdInputFocused) {
+                    input.value = data.user_id || '';
+                }
+            } catch (error) {
+                console.error('Error loading user ID:', error);
+            }
+        }
+        
+        async function setUserId() {
+            const input = document.getElementById('userIdInput');
+            const userId = input.value.trim();
+            
+            if (!userId) {
+                alert('Please enter a user UUID');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/simulation/user-id', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({user_id: userId})
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('User ID set to', data.user_id);
+                } else {
+                    const error = await response.json();
+                    alert('Error: ' + error.error);
+                }
+            } catch (error) {
+                console.error('Error setting user ID:', error);
+                alert('Failed to set user ID');
+            }
+        }
+        
         // Initial load
         loadDemoModeStatus();
         loadEmotionBiases();
         loadGenerationInterval();
+        loadModalityToggles();
+        loadUserId();
         loadDashboardData();
         
         // Auto-refresh every 2 seconds
@@ -746,6 +922,8 @@ async def dashboard():
             loadDemoModeStatus();
             loadEmotionBiases();
             loadGenerationInterval();
+            loadModalityToggles();
+            loadUserId();
             loadDashboardData();
         }, 2000);
     </script>
@@ -764,10 +942,11 @@ async def dashboard_status():
         Dictionary with status for each modality (SER, FER, Vitals)
     """
     try:
-        storage = SignalStorage.get_instance()
         demo_manager = DemoModeManager.get_instance()
         bias_manager = EmotionBiasManager.get_instance()
         interval_manager = GenerationIntervalManager.get_instance()
+        toggle_manager = ModalityToggleManager.get_instance()
+        user_id_manager = UserIdManager.get_instance()
         
         result = {
             "demo_mode": demo_manager.get_status(),
@@ -777,35 +956,172 @@ async def dashboard_status():
                 "vitals": bias_manager.get_bias("vitals")
             },
             "generation_interval": interval_manager.get_status(),
+            "modality_toggles": toggle_manager.get_status(),
+            "user_id": user_id_manager.get_status(),
             "ser": {},
             "fer": {},
             "vitals": {}
         }
         
-        # Get data for each modality
+        # Query database for each modality (last 24 hours)
+        client = _get_supabase_client()
+        malaysia_tz = get_malaysia_timezone()
+        now = datetime.now(malaysia_tz)
+        start_time = now - timedelta(hours=24)
+        
+        # Query database for each modality (last 24 hours)
+        # Note: vitals uses bvs_emotion table (not vitals_emotion)
         for modality in ["ser", "fer", "vitals"]:
-            count = storage.get_signal_count(modality)
-            file_status = storage.get_file_status(modality)
-            recent_signals = storage.get_all_signals(modality, limit=20)
-            
-            result[modality] = {
-                "count": count,
-                "file_status": file_status,
-                "recent_signals": [
-                    {
-                        "emotion_label": signal.emotion_label,
-                        "confidence": signal.confidence,
-                        "timestamp": signal.timestamp,
-                        "user_id": signal.user_id
-                    }
-                    for signal in recent_signals
-                ]
-            }
+            try:
+                # Map modality to table name
+                # Note: vitals uses bvs_emotion table (not vitals_emotion)
+                table_name = {
+                    "ser": "voice_emotion",
+                    "fer": "face_emotion",
+                    "vitals": "bvs_emotion"
+                }.get(modality)
+                
+                if not table_name:
+                    result[modality] = {"count": 0, "recent_signals": []}
+                    continue
+                
+                # Query database for recent records
+                start_time_str = start_time.isoformat()
+                now_str = now.isoformat()
+                
+                # Build query - handle bvs_emotion differently (needs emotion columns filter)
+                if modality == "vitals":
+                    # For bvs_emotion, only get records with emotion predictions
+                    # Note: timestamp and predicted_emotion columns exist, but emotion_confidence needs to be added
+                    query = client.table(table_name)\
+                        .select("*")\
+                        .not_.is_("predicted_emotion", "null")\
+                        .gte("timestamp", start_time_str)\
+                        .lte("timestamp", now_str)\
+                        .order("timestamp", desc=True)\
+                        .limit(20)
+                else:
+                    # For voice_emotion and face_emotion, use standard query
+                    query = client.table(table_name)\
+                        .select("*")\
+                        .gte("timestamp", start_time_str)\
+                        .lte("timestamp", now_str)\
+                        .order("timestamp", desc=True)\
+                        .limit(20)
+                
+                response = query.execute()
+                
+                # Get all unique user_ids from records to query last Fusion timestamps
+                user_ids_in_records = set()
+                for record in response.data:
+                    user_id = record.get("user_id", "")
+                    if user_id:
+                        user_ids_in_records.add(user_id)
+                
+                # Get last Fusion timestamps for all users (cache to avoid repeated queries)
+                last_fusion_timestamps = {}
+                for user_id in user_ids_in_records:
+                    try:
+                        last_fusion_timestamp = get_last_fusion_timestamp(user_id)
+                        if last_fusion_timestamp is not None:
+                            last_fusion_timestamps[user_id] = last_fusion_timestamp
+                    except Exception as e:
+                        logger.debug(f"Failed to get last Fusion timestamp for user {user_id}: {e}")
+                        # Continue without filtering for this user if query fails
+                
+                recent_signals = []
+                for record in response.data:
+                    emotion_label = record.get("predicted_emotion", "")
+                    # emotion_confidence column may not exist yet, default to 0.0 if missing
+                    confidence_value = record.get("emotion_confidence")
+                    confidence = float(confidence_value) if confidence_value is not None else 0.0
+                    timestamp_str = record.get("timestamp", "")
+                    # Fallback to date if timestamp doesn't exist
+                    if not timestamp_str:
+                        date_value = record.get("date")
+                        if date_value:
+                            timestamp_str = f"{date_value}T00:00:00"
+                    user_id = record.get("user_id", "")
+                    
+                    # Filter: only include signals after last Fusion run for this user
+                    if user_id and user_id in last_fusion_timestamps:
+                        try:
+                            # Parse signal timestamp
+                            signal_timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                            if signal_timestamp.tzinfo is None:
+                                signal_timestamp = signal_timestamp.replace(tzinfo=malaysia_tz)
+                            else:
+                                signal_timestamp = signal_timestamp.astimezone(malaysia_tz)
+                            
+                            last_fusion_ts = last_fusion_timestamps[user_id]
+                            if signal_timestamp <= last_fusion_ts:
+                                # Signal was already processed by Fusion, skip it
+                                continue
+                        except Exception as e:
+                            logger.debug(f"Failed to parse timestamp {timestamp_str} for filtering: {e}")
+                            # Include signal if timestamp parsing fails (graceful fallback)
+                    
+                    # Only include records with emotion data
+                    if emotion_label:
+                        recent_signals.append({
+                            "emotion_label": emotion_label,
+                            "confidence": confidence,
+                            "timestamp": timestamp_str,
+                            "user_id": user_id
+                        })
+                
+                result[modality] = {
+                    "count": len(recent_signals),  # Use filtered count, not raw database count
+                    "recent_signals": recent_signals
+                }
+            except Exception as e:
+                logger.warning(f"Failed to query database for {modality}: {e}")
+                result[modality] = {"count": 0, "recent_signals": []}
         
         return result
     
     except Exception as e:
         logger.error(f"Error getting dashboard status: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Internal server error: {str(e)}"}
+        )
+
+
+class UserIdRequest(BaseModel):
+    """Request model for setting user ID."""
+    user_id: str
+
+
+@router.get("/user-id")
+async def get_user_id():
+    """Get current user UUID."""
+    try:
+        manager = UserIdManager.get_instance()
+        return manager.get_status()
+    except Exception as e:
+        logger.error(f"Error getting user ID: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Internal server error: {str(e)}"}
+        )
+
+
+@router.post("/user-id")
+async def set_user_id(request: UserIdRequest):
+    """Set user UUID."""
+    try:
+        manager = UserIdManager.get_instance()
+        manager.set_user_id(request.user_id)
+        return {"status": "success", "user_id": request.user_id}
+    except ValueError as e:
+        logger.warning(f"Invalid user ID: {e}")
+        return JSONResponse(
+            status_code=400,
+            content={"error": str(e)}
+        )
+    except Exception as e:
+        logger.error(f"Error setting user ID: {e}", exc_info=True)
         return JSONResponse(
             status_code=500,
             content={"error": f"Internal server error: {str(e)}"}

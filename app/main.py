@@ -31,7 +31,6 @@ app = FastAPI(
 from . import api as ser_api
 from . import dashboard as ser_dashboard
 from .queue_manager import QueueManager
-from .aggregator import Aggregator
 
 # Import simulation routes
 from simulation import api as simulation_api
@@ -39,10 +38,11 @@ from simulation import dashboard as simulation_dashboard
 from simulation.demo_mode import DemoModeManager
 from simulation.generation_interval import GenerationIntervalManager
 from simulation.signal_generator import generate_and_send_signals
+from simulation.modality_toggle import ModalityToggleManager
+from simulation.user_id import UserIdManager
 
 # Include SER service routes
 app.include_router(ser_api.router)
-app.include_router(ser_api.fusion_router)  # Fusion endpoints (no prefix)
 app.include_router(ser_dashboard.router)
 
 # Include simulation routes
@@ -72,12 +72,10 @@ async def health():
     """Health check endpoint for Cloud Run."""
     try:
         queue_manager = QueueManager.get_instance()
-        aggregator = Aggregator.get_instance()
         
         return {
             "status": "healthy",
             "queue_manager": "running" if queue_manager.is_running() else "stopped",
-            "aggregator": "running" if aggregator.is_running() else "stopped",
             "queue_size": queue_manager.get_queue_size()
         }
     except Exception as e:
@@ -92,7 +90,8 @@ async def auto_signal_generation_task():
     """
     demo_manager = DemoModeManager.get_instance()
     interval_manager = GenerationIntervalManager.get_instance()
-    user_id = os.getenv("DEV_USER_ID", "8517c97f-66ef-4955-86ed-531013d33d3e")
+    toggle_manager = ModalityToggleManager.get_instance()
+    user_id_manager = UserIdManager.get_instance()
     modalities = ["ser", "fer", "vitals"]
     
     logger.info("Auto signal generation task started")
@@ -103,19 +102,28 @@ async def auto_signal_generation_task():
             interval = interval_manager.get_interval()
             
             if demo_manager.is_enabled():
-                # Generate signals for all modalities
+                # Generate signals only for enabled modalities
+                generated_count = 0
                 for modality in modalities:
-                    try:
-                        await generate_and_send_signals(
-                            modality=modality,
-                            user_id=user_id,
-                            count=1,
-                            cloud_url=None  # Write locally since we're in the same service
-                        )
-                    except Exception as e:
-                        logger.warning(f"Error generating {modality} signals: {e}")
+                    # Check if this modality is enabled
+                    if toggle_manager.is_enabled(modality):
+                        try:
+                            # Get user_id from UserIdManager
+                            current_user_id = user_id_manager.get_user_id()
+                            await generate_and_send_signals(
+                                modality=modality,
+                                user_id=current_user_id,
+                                count=1,
+                                cloud_url=None  # Write locally since we're in the same service
+                            )
+                            generated_count += 1
+                        except Exception as e:
+                            logger.warning(f"Error generating {modality} signals: {e}")
+                    else:
+                        logger.debug(f"Skipping {modality} generation (disabled)")
                 
-                logger.debug(f"Auto-generated signals for all modalities (demo mode ON, interval: {interval}s)")
+                if generated_count > 0:
+                    logger.debug(f"Auto-generated signals for {generated_count} enabled modalities (demo mode ON, interval: {interval}s)")
             else:
                 logger.debug("Demo mode OFF, skipping signal generation")
             
@@ -145,14 +153,6 @@ async def startup_event():
         logger.info("✓ QueueManager worker thread started")
     except Exception as e:
         logger.error(f"Failed to start QueueManager: {e}", exc_info=True)
-    
-    # Start Aggregator periodic timer
-    try:
-        aggregator = Aggregator.get_instance()
-        aggregator.start_periodic_aggregation()
-        logger.info("✓ Aggregator periodic timer started")
-    except Exception as e:
-        logger.error(f"Failed to start Aggregator: {e}", exc_info=True)
     
     # Start auto signal generation background task
     try:
@@ -184,14 +184,6 @@ async def shutdown_event():
             logger.info("✓ Auto signal generation task stopped")
         except Exception as e:
             logger.error(f"Error stopping auto signal generation task: {e}", exc_info=True)
-    
-    # Stop Aggregator
-    try:
-        aggregator = Aggregator.get_instance()
-        aggregator.stop_periodic_aggregation()
-        logger.info("✓ Aggregator stopped")
-    except Exception as e:
-        logger.error(f"Error stopping Aggregator: {e}", exc_info=True)
     
     # Stop QueueManager
     try:

@@ -15,7 +15,6 @@ from datetime import datetime
 from typing import List
 
 from app.queue_manager import QueueManager
-from app.session_manager import SessionManager
 from app.models import PredictRequest, ModelPredictResponse, ModelSignal
 
 logger = logging.getLogger(__name__)
@@ -123,93 +122,4 @@ def _map_ser_emotion_to_fusion(ser_emotion: str) -> str | None:
     return SER_TO_FUSION_EMOTION_MAP.get(ser_emotion_lower)
 
 
-@fusion_router.post("/predict", response_model=ModelPredictResponse)
-async def predict(request: PredictRequest):
-    """
-    Get emotion predictions within a time window (for fusion service).
-    
-    This endpoint is called by the fusion service to retrieve emotion signals
-    from SER within a specified time window.
-    
-    Args:
-        request: PredictRequest with user_id, snapshot_timestamp, and window_seconds
-    
-    Returns:
-        ModelPredictResponse with list of ModelSignal objects
-    """
-    logger.info(
-        f"POST /predict - Called for user {request.user_id}, "
-        f"snapshot: {request.snapshot_timestamp}, window: {request.window_seconds}s"
-    )
-    
-    try:
-        # Validate user_id
-        try:
-            uuid.UUID(request.user_id)
-        except ValueError:
-            return JSONResponse(
-                status_code=400,
-                content={"error": f"Invalid user_id format: {request.user_id}. Must be a valid UUID."}
-            )
-        
-        # Parse snapshot timestamp
-        try:
-            snapshot_timestamp = datetime.fromisoformat(request.snapshot_timestamp.replace('Z', '+00:00'))
-        except ValueError as e:
-            return JSONResponse(
-                status_code=400,
-                content={"error": f"Invalid snapshot_timestamp format: {e}"}
-            )
-        
-        # Calculate time window
-        window_start = snapshot_timestamp.timestamp() - request.window_seconds
-        window_end = snapshot_timestamp.timestamp()
-        
-        window_start_dt = datetime.fromtimestamp(window_start)
-        window_end_dt = datetime.fromtimestamp(window_end)
-        
-        logger.debug(
-            f"Querying results for user {request.user_id} "
-            f"in window [{window_start_dt.isoformat()}, {window_end_dt.isoformat()}]"
-        )
-        
-        # Get results from SessionManager
-        session_manager = SessionManager.get_instance()
-        chunk_results = session_manager.get_results_in_window(
-            request.user_id,
-            window_start_dt,
-            window_end_dt
-        )
-        
-        logger.info(f"Found {len(chunk_results)} chunk results in time window")
-        
-        # Convert ChunkResult to ModelSignal
-        signals: List[ModelSignal] = []
-        for chunk_result in chunk_results:
-            # Map SER emotion to fusion emotion
-            fusion_emotion = _map_ser_emotion_to_fusion(chunk_result.emotion)
-            
-            # Skip if emotion is not mappable (e.g., "neu", "dis", "sur", "unknown")
-            if fusion_emotion is None:
-                logger.debug(f"Skipping unmappable emotion: {chunk_result.emotion}")
-                continue
-            
-            signal = ModelSignal(
-                user_id=request.user_id,
-                timestamp=chunk_result.timestamp.isoformat(),
-                modality="speech",
-                emotion_label=fusion_emotion,
-                confidence=float(chunk_result.emotion_confidence)
-            )
-            signals.append(signal)
-        
-        logger.info(f"Returning {len(signals)} signals to fusion service")
-        
-        return ModelPredictResponse(signals=signals)
-        
-    except Exception as e:
-        logger.error(f"Error in /predict endpoint: {e}", exc_info=True)
-        return JSONResponse(
-            status_code=500,
-            content={"error": f"Internal server error: {str(e)}"}
-        )
+# Note: /predict endpoint removed - Fusion service now queries database directly
