@@ -396,7 +396,7 @@ async def main():
     parser.add_argument(
         "--user-id",
         type=str,
-        default=os.getenv("DEV_USER_ID", "8517c97f-66ef-4955-86ed-531013d33d3e"),
+        default=os.getenv("DEV_USER_ID", "96975f52-5b05-4eb1-bfa5-530485112518"),
         help="User ID for signals (default: from DEV_USER_ID env var)"
     )
     parser.add_argument(

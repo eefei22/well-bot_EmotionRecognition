@@ -13,7 +13,7 @@ import uuid
 logger = logging.getLogger(__name__)
 
 # Default user ID from environment variable or fallback
-DEFAULT_USER_ID = os.getenv("DEV_USER_ID", "8517c97f-66ef-4955-86ed-531013d33d3e")
+DEFAULT_USER_ID = os.getenv("DEV_USER_ID", "96975f52-5b05-4eb1-bfa5-530485112518")
 
 
 class UserIdManager:

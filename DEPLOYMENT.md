@@ -135,7 +135,7 @@ Set these in Cloud Run:
 ```bash
 curl -X POST "https://your-service-url.run.app/analyze-speech" \
   -F "file=@audio.wav" \
-  -F "user_id=8517c97f-66ef-4955-86ed-531013d33d3e"
+  -F "user_id=96975f52-5b05-4eb1-bfa5-530485112518"
 ```
 
 ### Test with Python:
@@ -144,7 +144,7 @@ curl -X POST "https://your-service-url.run.app/analyze-speech" \
 import requests
 
 url = "https://your-service-url.run.app/analyze-speech"
-user_id = "8517c97f-66ef-4955-86ed-531013d33d3e"  # User UUID
+user_id = "96975f52-5b05-4eb1-bfa5-530485112518"  # User UUID
 
 with open("audio.wav", "rb") as f:
     files = {"file": ("audio.wav", f, "audio/wav")}
