@@ -10,6 +10,7 @@ import gc
 
 # Imports moved to lazy loading
 from app.config import settings
+from typing import Optional, Tuple  # Add Optional to the import
 
 from app.config import settings
 
@@ -48,7 +49,7 @@ def _get_asr_model(language_code: Optional[str] = None):
     # Load model if not already cached
     if model_name not in _asr_models:
         # Lazy import funasr
-        from funasr import AutoModel
+        from funasr import AutoModel  # type: ignore
         
         logger.info(f"Loading Paraformer ASR model: {model_name} (hub: {settings.FUNASR_HUB})")
         try:
@@ -82,15 +83,15 @@ def transcribe_audio(
     """
     try:
         import hashlib
-        import librosa
-        import numpy as np
-        import soundfile as sf
+        import librosa  # type: ignore
+        import numpy as np  # type: ignore
+        import soundfile as sf  # type: ignore
         import tempfile
         import os
         
         # Monkey-patch torchaudio if needed (for FunASR)
-        import torchaudio
-        import torch
+        import torchaudio  # type: ignore
+        import torch  # type: ignore
         
         # We only need to patch it once, but checking attributes or re-patching is fine if simple
         if not getattr(torchaudio, "_is_patched_by_ser", False):

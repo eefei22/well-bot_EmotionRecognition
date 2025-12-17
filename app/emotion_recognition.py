@@ -10,7 +10,7 @@ import gc
 
 # Imports moved to lazy loading in predict_emotion
 from app.config import settings
-from typing import Tuple
+from typing import Tuple  # Add this import
 
 from app.config import settings
 
@@ -55,7 +55,7 @@ def _load_emotion_model():
     
     if _ser_model is None:
         # Lazy import funasr here
-        from funasr import AutoModel
+        from funasr import AutoModel  # type: ignore
         
         logger.info("Loading emotion2vec+ model (first use)...")
         logger.info(f"  Model: {settings.EMOTION2VEC_MODEL}")
@@ -108,15 +108,15 @@ def predict_emotion(audio_path: str) -> Tuple[str, float]:
     """
     try:
         import hashlib
-        import librosa
-        import numpy as np
-        import soundfile as sf
+        import librosa  # type: ignore
+        import numpy as np  # type: ignore
+        import soundfile as sf  # type: ignore
         import tempfile
         import os
         
         # Monkey-patch torchaudio if needed (for FunASR)
-        import torchaudio
-        import torch
+        import torchaudio  # type: ignore
+        import torch  # type: ignore
         
         # We only need to patch it once, but checking attributes or re-patching is fine if simple
         if not getattr(torchaudio, "_is_patched_by_ser", False):
