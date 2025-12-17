@@ -343,57 +343,51 @@ def insert_vitals_emotion_synthetic(
     is_synthetic: bool = True
 ) -> Optional[Dict]:
     """
-    Write synthetic Vitals result to bvs_emotion table.
-    
-    Note: bvs_emotion table requires timestamp, predicted_emotion, and emotion_confidence columns.
-    If these columns don't exist, the insert will fail.
-    
+    Write synthetic Vitals-derived emotion result to bvs_emotion table.
+
+    Note: bvs_emotion table only has emotion columns (predicted_emotion, emotion_confidence).
+    Vitals signals are treated as emotion predictions derived from biometric data.
+
     Args:
         user_id: UUID of the user
         timestamp: Timestamp for the emotion signal
-        emotion_label: Emotion label ("Happy", "Sad", "Angry", "Fear")
+        emotion_label: Emotion label derived from vitals ("Happy", "Sad", "Angry", "Fear")
         confidence: Confidence score (0.0-1.0)
         is_synthetic: Whether this is synthetic data (default: True)
-    
+
     Returns:
         Dictionary with inserted record data, or None if failed
     """
     try:
         client = _get_supabase_client()
         malaysia_tz = get_malaysia_timezone()
-        
+
         # Ensure timestamp is timezone-aware (UTC+8)
         if timestamp.tzinfo is None:
             timestamp = timestamp.replace(tzinfo=malaysia_tz)
         else:
             timestamp = timestamp.astimezone(malaysia_tz)
-        
+
         # Convert timestamp to ISO format string (timezone-naive for database)
         timestamp_str = timestamp.isoformat()
-        # Extract date for the date column (bvs_emotion has both date and timestamp)
+        # Extract date for the date column
         date_str = timestamp.date().isoformat()
-        
-        # Prepare data for bvs_emotion table
-        # Note: bvs_emotion has required columns: steps, sleep, activity, heart_rate, heart_rate_variability
-        # For synthetic data, we'll use default/placeholder values for these
+
+        # Prepare data for bvs_emotion table - only insert columns that exist
+        # bvs_emotion table schema: user_id, timestamp, predicted_emotion, emotion_confidence, date
         data = {
             "user_id": user_id,
-            "date": date_str,  # Required: date column
-            "timestamp": timestamp_str,  # Column for emotion signals (already exists)
-            "steps": 0,  # Required: default to 0 for synthetic
-            "sleep": 0.0,  # Required: default to 0 for synthetic
-            "activity": 0.0,  # Required: default to 0 for synthetic
-            "heart_rate": 70.0,  # Required: default to 70 bpm for synthetic
-            "heart_rate_variability": 0.0,  # Required: default to 0 for synthetic
-            "predicted_emotion": emotion_label,  # Column for emotion prediction (already exists)
-            "emotion_confidence": confidence,  # Column for emotion confidence (needs to be added)
+            "timestamp": timestamp_str,
+            "predicted_emotion": emotion_label,
+            "emotion_confidence": confidence,
+            "date": date_str,
         }
-        
+
         # Insert into bvs_emotion table
         response = client.table("bvs_emotion")\
             .insert(data)\
             .execute()
-        
+
         if response.data and len(response.data) > 0:
             inserted_record = response.data[0]
             logger.info(
