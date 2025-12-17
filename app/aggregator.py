@@ -2,12 +2,10 @@
 Aggregator for SER Service
 
 Aggregates chunk results over time windows (default: 5 minutes),
-calculates averages, and writes to log files.
+calculates averages, and logs to in-memory storage.
 """
 
 import logging
-import json
-import os
 import threading
 import time
 from typing import Dict, List, Optional
@@ -18,6 +16,7 @@ from app.session_manager import SessionManager
 from app.models import ChunkResult, AggregatedResult
 from app.config import settings
 from app.aggregation_interval import AggregationIntervalManager
+from app.ser_result_logger import log_aggregated_result
 
 logger = logging.getLogger(__name__)
 
@@ -37,10 +36,6 @@ class Aggregator:
         # Get initial interval from manager (defaults to settings if not set)
         initial_interval = self.interval_manager.get_interval()
         self.aggregation_window = timedelta(seconds=initial_interval)
-        self.log_dir = settings.AGGREGATION_LOG_DIR
-        
-        # Ensure log directory exists
-        os.makedirs(self.log_dir, exist_ok=True)
         
         self.running = False
         self._running_lock = threading.Lock()
@@ -276,39 +271,31 @@ class Aggregator:
     
     def _write_to_log(self, aggregated_result: AggregatedResult):
         """
-        Write aggregated result to JSON log file.
+        Write aggregated result to in-memory storage.
         
         Args:
             aggregated_result: AggregatedResult to write
         """
-        # Create log entry
-        log_entry = {
-            "timestamp": aggregated_result.timestamp.isoformat(),
-            "user_id": aggregated_result.user_id,
-            "session_id": aggregated_result.session_id,
-            "window_start": aggregated_result.window_start.isoformat(),
-            "window_end": aggregated_result.window_end.isoformat(),
-            "chunk_count": aggregated_result.chunk_count,
-            "aggregated_result": {
+        try:
+            log_aggregated_result(
+                user_id=aggregated_result.user_id,
+                session_id=aggregated_result.session_id,
+                timestamp=aggregated_result.timestamp.isoformat(),
+                window_start=aggregated_result.window_start.isoformat(),
+                window_end=aggregated_result.window_end.isoformat(),
+                chunk_count=aggregated_result.chunk_count,
+                aggregated_result={
                 "emotion": aggregated_result.emotion,
                 "emotion_confidence": aggregated_result.emotion_confidence,
                 "sentiment": aggregated_result.sentiment,
                 "sentiment_confidence": aggregated_result.sentiment_confidence
             }
-        }
-        
-        # Write to JSON Lines file (one entry per line)
-        log_file = os.path.join(self.log_dir, "aggregation_log.jsonl")
-        
-        try:
-            with open(log_file, "a", encoding="utf-8") as f:
-                json.dump(log_entry, f, ensure_ascii=False)
-                f.write("\n")
+            )
             
-            logger.debug(f"Written aggregation log entry to {log_file}")
+            logger.debug(f"Logged aggregated result for user {aggregated_result.user_id}")
             
         except Exception as e:
-            logger.error(f"Failed to write aggregation log entry: {e}", exc_info=True)
+            logger.error(f"Failed to log aggregated result: {e}", exc_info=True)
     
     def is_running(self) -> bool:
         """Check if periodic aggregation is running."""

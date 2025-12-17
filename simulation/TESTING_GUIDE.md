@@ -11,66 +11,7 @@ This guide covers testing Phases 1-5 of the simulation module implementation.
 
 ## Phase 1: Core Infrastructure Testing
 
-### 1.1 Test SignalStorage
-
-```python
-# Test script: test_signal_storage.py
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from simulation.signal_storage import SignalStorage
-from app.models import ModelSignal
-from datetime import datetime, timedelta
-
-# Get storage instance
-storage = SignalStorage.get_instance()
-
-# Create a test signal
-test_signal = ModelSignal(
-    user_id="test-user-123",
-    timestamp=datetime.now().isoformat(),
-    modality="speech",
-    emotion_label="Happy",
-    confidence=0.85
-)
-
-# Write signal
-print("Writing signal...")
-storage.write_signal("ser", test_signal)
-print("✓ Signal written")
-
-# Read signals
-print("\nReading signals...")
-signals = storage.read_signals_in_window(
-    "ser",
-    "test-user-123",
-    datetime.now() - timedelta(minutes=5),
-    datetime.now()
-)
-print(f"✓ Found {len(signals)} signals")
-
-# Get count
-count = storage.get_signal_count("ser")
-print(f"✓ Signal count: {count}")
-
-# Get file status
-status = storage.get_file_status("ser")
-print(f"✓ File status: {status}")
-
-# Clear signals
-print("\nClearing signals...")
-storage.clear_signals("ser")
-print("✓ Signals cleared")
-```
-
-**Run:**
-```bash
-cd Well-Bot_SER
-python -c "exec(open('simulation/TESTING_GUIDE.md').read())"  # Or create test_signal_storage.py
-```
-
-### 1.2 Test DemoModeManager
+### 1.1 Test DemoModeManager
 
 ```python
 # Test script: test_demo_mode.py

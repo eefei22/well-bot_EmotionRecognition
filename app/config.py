@@ -14,7 +14,6 @@ class Settings(BaseSettings):
     # Aggregation and session configuration
     AGGREGATION_WINDOW_SECONDS: int = 300  # 5 minutes default
     SESSION_GAP_THRESHOLD_SECONDS: int = 60  # 1 minute gap = new session
-    AGGREGATION_LOG_DIR: str = "data/aggregation_logs"
     FUSION_SERVICE_URL: Optional[str] = None  # Optional, for future auto-send to fusion
     
     # Result logging

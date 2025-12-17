@@ -301,21 +301,18 @@ def insert_face_emotion_synthetic(
         else:
             timestamp = timestamp.astimezone(malaysia_tz)
         
-        # Convert timestamp to ISO format string
-        timestamp_str = timestamp.isoformat()
+        # Convert timestamp to ISO format string (without timezone for face_emotion)
+        timestamp_str = timestamp.strftime("%Y-%m-%d %H:%M:%S")
+        date_str = timestamp.date().isoformat()
         
         # Prepare data for insertion
-        # face_emotion table requires: user_id, frame_id, timestamp, bounding_box, confidence_score,
-        # predicted_emotion, emotion_confidence
-        # For synthetic data, we'll use minimal required fields
+        # face_emotion table schema (updated): user_id, timestamp, predicted_emotion, emotion_confidence, date
         data = {
             "user_id": user_id,
-            "frame_id": int(timestamp.timestamp() * 1000),  # Use timestamp as frame_id for synthetic
             "timestamp": timestamp_str,
-            "bounding_box": {},  # Empty JSONB for synthetic
-            "confidence_score": confidence,
             "predicted_emotion": emotion_label,
             "emotion_confidence": confidence,
+            "date": date_str
         }
         
         # Insert into database

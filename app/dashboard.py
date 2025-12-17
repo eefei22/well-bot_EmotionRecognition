@@ -7,11 +7,10 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from typing import List, Dict, Optional
 from datetime import datetime
 import logging
-import json
-import os
 
 from app.queue_manager import QueueManager
 from app.database import query_voice_emotion_signals, get_malaysia_timezone, get_last_fusion_timestamp
+from app.ser_result_logger import read_aggregated_results
 from app.config import settings
 from app.aggregation_interval import AggregationIntervalManager
 from datetime import timedelta
@@ -502,54 +501,36 @@ async def dashboard():
 
 def _read_aggregated_results(limit: int = 100) -> List[Dict]:
     """
-    Read aggregated results from the log file and filter by fusion timestamp.
-    
+    Read aggregated results from in-memory storage and filter by fusion timestamp.
+
     Only returns aggregated results that occurred after the last Fusion run for each user.
-    
+
     Args:
         limit: Maximum number of results to return
-        
+
     Returns:
         List of aggregated result dictionaries (filtered by fusion timestamp)
     """
-    log_file = os.path.join(settings.AGGREGATION_LOG_DIR, "aggregation_log.jsonl")
-    
-    if not os.path.exists(log_file):
+    # Get all aggregated results from in-memory storage (already sorted newest first)
+    aggregated_results = read_aggregated_results(limit=1000)  # Get more than needed for filtering
+
+    if not aggregated_results:
         return []
-    
-    aggregated_results = []
-    
-    try:
-        with open(log_file, "r", encoding="utf-8") as f:
-            # Read all lines and parse JSON
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    entry = json.loads(line)
-                    aggregated_results.append(entry)
-                except json.JSONDecodeError as e:
-                    logger.warning(f"Failed to parse aggregation log entry: {e}")
-                    continue
-        
-        # Sort by timestamp (newest first)
-        aggregated_results.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
-        
-        # Filter by fusion timestamp per user
-        # Extract unique user_ids
-        user_ids = set(entry.get("user_id") for entry in aggregated_results if entry.get("user_id"))
-        
-        # Get last Fusion timestamps for all users
-        last_fusion_timestamps = {}
-        for user_id in user_ids:
-            try:
-                last_fusion_timestamp = get_last_fusion_timestamp(user_id)
-                if last_fusion_timestamp is not None:
-                    last_fusion_timestamps[user_id] = last_fusion_timestamp
-            except Exception as e:
-                logger.debug(f"Failed to get last Fusion timestamp for user {user_id}: {e}")
-                # Continue without filtering for this user if query fails
+
+    # Filter by fusion timestamp per user
+    # Extract unique user_ids
+    user_ids = set(entry.get("user_id") for entry in aggregated_results if entry.get("user_id"))
+
+    # Get last Fusion timestamps for all users
+    last_fusion_timestamps = {}
+    for user_id in user_ids:
+        try:
+            last_fusion_timestamp = get_last_fusion_timestamp(user_id)
+            if last_fusion_timestamp is not None:
+                last_fusion_timestamps[user_id] = last_fusion_timestamp
+        except Exception as e:
+            logger.debug(f"Failed to get last Fusion timestamp for user {user_id}: {e}")
+            # Continue without filtering for this user if query fails
         
         # Filter aggregated results: only include entries after last Fusion run
         filtered_results = []
@@ -587,9 +568,9 @@ def _read_aggregated_results(limit: int = 100) -> List[Dict]:
         # Return last N filtered results
         return filtered_results[:limit]
         
-    except Exception as e:
-        logger.error(f"Error reading aggregated results from {log_file}: {e}", exc_info=True)
-        return []
+except Exception as e:
+    logger.error(f"Error reading aggregated results from memory: {e}", exc_info=True)
+    return []
 
 
 @router.get("/api/dashboard/status")

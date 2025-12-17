@@ -17,6 +17,7 @@ from app.processing_pipeline import analyze_full
 from app.database import insert_voice_emotion
 from app.models import ChunkResult
 from app.config import settings
+from app.ser_result_logger import log_individual_result
 import librosa
 
 logger = logging.getLogger(__name__)
@@ -52,11 +53,7 @@ class QueueManager:
         self._results_lock = threading.Lock()
         self._max_recent_results = 100
         
-        # Result log file setup
-        self._results_log_file = None
-        self._results_log_lock = threading.Lock()
-        if settings.RESULTS_LOG_ENABLED:
-            self._init_results_log()
+        # Results logging is now in-memory (no file setup needed)
         
         logger.info("QueueManager initialized")
     
@@ -288,8 +285,9 @@ class QueueManager:
                 "sentiment_confidence": analysis_result.get("sentiment_confidence")
             }
             
-            # Log result to file
-            self._log_result_to_file(user_id, timestamp, result_dict)
+            # Log result to in-memory storage
+            if settings.RESULTS_LOG_ENABLED:
+                log_individual_result(user_id, timestamp.isoformat(), result_dict)
             
             return result_dict
             
@@ -332,48 +330,4 @@ class QueueManager:
         with self._results_lock:
             return self._recent_results[:limit].copy()
     
-    def _init_results_log(self):
-        """Initialize results log file."""
-        try:
-            # Create log directory if it doesn't exist
-            log_dir = settings.RESULTS_LOG_DIR
-            os.makedirs(log_dir, exist_ok=True)
-            
-            # Create log file with timestamp
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            log_filename = f"ser_results_{timestamp}.jsonl"
-            log_path = os.path.join(log_dir, log_filename)
-            
-            self._results_log_file = log_path
-            logger.info(f"Results log file initialized: {log_path}")
-        except Exception as e:
-            logger.error(f"Failed to initialize results log: {e}", exc_info=True)
-            self._results_log_file = None
-    
-    def _log_result_to_file(self, user_id: str, timestamp: datetime, result: Dict):
-        """
-        Log processing result to JSONL file.
-        
-        Args:
-            user_id: User identifier
-            timestamp: Timestamp when chunk was captured
-            result: Result dictionary with emotion, transcript, etc.
-        """
-        if not settings.RESULTS_LOG_ENABLED or not self._results_log_file:
-            return
-        
-        try:
-            log_entry = {
-                "user_id": user_id,
-                "timestamp": timestamp.isoformat(),
-                "processed_at": datetime.now().isoformat(),
-                **result
-            }
-            
-            with self._results_log_lock:
-                with open(self._results_log_file, 'a', encoding='utf-8') as f:
-                    f.write(json.dumps(log_entry, ensure_ascii=False) + '\n')
-            
-            logger.debug(f"Logged result to file: {self._results_log_file}")
-        except Exception as e:
-            logger.warning(f"Failed to log result to file: {e}", exc_info=True)
+    # File logging methods removed - now using in-memory logging

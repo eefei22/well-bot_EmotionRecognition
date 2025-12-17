@@ -969,6 +969,9 @@ async def dashboard_status():
         now = datetime.now(malaysia_tz)
         start_time = now - timedelta(hours=24)
         
+        # Get current user UUID from manager
+        current_user_id = user_id_manager.get_user_id()
+        
         # Query database for each modality (last 24 hours)
         # Note: vitals uses bvs_emotion table (not vitals_emotion)
         for modality in ["ser", "fer", "vitals"]:
@@ -995,6 +998,7 @@ async def dashboard_status():
                     # Note: timestamp and predicted_emotion columns exist, but emotion_confidence needs to be added
                     query = client.table(table_name)\
                         .select("*")\
+                        .eq("user_id", current_user_id)\
                         .not_.is_("predicted_emotion", "null")\
                         .gte("timestamp", start_time_str)\
                         .lte("timestamp", now_str)\
@@ -1004,6 +1008,7 @@ async def dashboard_status():
                     # For voice_emotion and face_emotion, use standard query
                     query = client.table(table_name)\
                         .select("*")\
+                        .eq("user_id", current_user_id)\
                         .gte("timestamp", start_time_str)\
                         .lte("timestamp", now_str)\
                         .order("timestamp", desc=True)\
