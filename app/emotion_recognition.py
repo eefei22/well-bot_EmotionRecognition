@@ -10,6 +10,7 @@ import gc
 
 # Imports moved to lazy loading in predict_emotion
 from app.config import settings
+from typing import Tuple
 
 from app.config import settings
 
