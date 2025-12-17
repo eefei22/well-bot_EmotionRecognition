@@ -18,7 +18,6 @@ from app.database import insert_voice_emotion
 from app.models import ChunkResult
 from app.config import settings
 from app.ser_result_logger import log_individual_result
-import librosa
 
 logger = logging.getLogger(__name__)
 
@@ -233,6 +232,7 @@ class QueueManager:
         try:
             # Get audio metadata for database insertion
             try:
+                import librosa
                 y, sr = librosa.load(audio_file_path, sr=None, mono=False)
                 duration_sec = len(y) / sr if sr > 0 else 0.0
                 # If stereo, convert to mono length

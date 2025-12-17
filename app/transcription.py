@@ -7,43 +7,9 @@ Supports language-specific Paraformer models for improved accuracy.
 
 import logging
 import gc
-import librosa
-import numpy as np
-import soundfile as sf
-import tempfile
-import os
-from typing import Tuple, Optional
 
-# Monkey-patch torchaudio.load() to use soundfile directly BEFORE importing FunASR
-# This completely bypasses torchcodec/ffmpeg
-import torchaudio
-import torch
-
-_original_torchaudio_load = torchaudio.load
-
-def _patched_torchaudio_load(filepath, *args, **kwargs):
-    """Patched version that uses soundfile directly, bypassing torchcodec entirely."""
-    try:
-        # Use soundfile directly to load audio (bypasses torchcodec)
-        data, sample_rate = sf.read(filepath, dtype='float32')
-        # Convert to torch tensor matching torchaudio format: (channels, samples)
-        if len(data.shape) == 1:
-            # Mono: add channel dimension -> (1, samples)
-            data_tensor = torch.from_numpy(data).unsqueeze(0)
-        else:
-            # Multi-channel: transpose -> (channels, samples)
-            data_tensor = torch.from_numpy(data.T)
-        return data_tensor, sample_rate
-    except Exception as e:
-        # Fallback to original if soundfile fails
-        import logging
-        logging.warning(f"Soundfile load failed for {filepath}, falling back: {e}")
-        kwargs['backend'] = 'soundfile'
-        return _original_torchaudio_load(filepath, *args, **kwargs)
-
-torchaudio.load = _patched_torchaudio_load
-
-from funasr import AutoModel
+# Imports moved to lazy loading
+from app.config import settings
 
 from app.config import settings
 
@@ -81,6 +47,9 @@ def _get_asr_model(language_code: Optional[str] = None):
     
     # Load model if not already cached
     if model_name not in _asr_models:
+        # Lazy import funasr
+        from funasr import AutoModel
+        
         logger.info(f"Loading Paraformer ASR model: {model_name} (hub: {settings.FUNASR_HUB})")
         try:
             _asr_models[model_name] = AutoModel(
@@ -113,6 +82,43 @@ def transcribe_audio(
     """
     try:
         import hashlib
+        import librosa
+        import numpy as np
+        import soundfile as sf
+        import tempfile
+        import os
+        
+        # Monkey-patch torchaudio if needed (for FunASR)
+        import torchaudio
+        import torch
+        
+        # We only need to patch it once, but checking attributes or re-patching is fine if simple
+        if not getattr(torchaudio, "_is_patched_by_ser", False):
+            _original_torchaudio_load = torchaudio.load
+            
+            def _patched_torchaudio_load(filepath, *args, **kwargs):
+                """Patched version that uses soundfile directly, bypassing torchcodec entirely."""
+                try:
+                    # Use soundfile directly to load audio (bypasses torchcodec)
+                    data, sample_rate = sf.read(filepath, dtype='float32')
+                    # Convert to torch tensor matching torchaudio format: (channels, samples)
+                    if len(data.shape) == 1:
+                        # Mono: add channel dimension -> (1, samples)
+                        data_tensor = torch.from_numpy(data).unsqueeze(0)
+                    else:
+                        # Multi-channel: transpose -> (channels, samples)
+                        data_tensor = torch.from_numpy(data.T)
+                    return data_tensor, sample_rate
+                except Exception as e:
+                    # Fallback to original if soundfile fails
+                    import logging
+                    logging.warning(f"Soundfile load failed for {filepath}, falling back: {e}")
+                    kwargs['backend'] = 'soundfile'
+                    return _original_torchaudio_load(filepath, *args, **kwargs)
+
+            torchaudio.load = _patched_torchaudio_load
+            setattr(torchaudio, "_is_patched_by_ser", True)
+        
         
         logger.info("=" * 60)
         logger.info("TRANSCRIPTION: Starting")

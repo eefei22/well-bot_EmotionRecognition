@@ -5,7 +5,8 @@ Sentiment analysis on transcribed text using transformer models.
 Uses multilingual XLM-RoBERTa-based sentiment model.
 """
 
-from transformers import pipeline
+
+# Lazy imports
 import logging
 from typing import Tuple
 
@@ -22,6 +23,8 @@ def _load_sentiment_pipeline():
     global _sentiment_pipeline
     
     if _sentiment_pipeline is None:
+        from transformers import pipeline
+        
         logger.info("Loading sentiment analysis model (first use)...")
         _sentiment_pipeline = pipeline(
             "sentiment-analysis",

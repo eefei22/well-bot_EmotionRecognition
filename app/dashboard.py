@@ -511,26 +511,27 @@ def _read_aggregated_results(limit: int = 100) -> List[Dict]:
     Returns:
         List of aggregated result dictionaries (filtered by fusion timestamp)
     """
-    # Get all aggregated results from in-memory storage (already sorted newest first)
-    aggregated_results = read_aggregated_results(limit=1000)  # Get more than needed for filtering
+    try:
+        # Get all aggregated results from in-memory storage (already sorted newest first)
+        aggregated_results = read_aggregated_results(limit=1000)  # Get more than needed for filtering
 
-    if not aggregated_results:
-        return []
+        if not aggregated_results:
+            return []
 
-    # Filter by fusion timestamp per user
-    # Extract unique user_ids
-    user_ids = set(entry.get("user_id") for entry in aggregated_results if entry.get("user_id"))
+        # Filter by fusion timestamp per user
+        # Extract unique user_ids
+        user_ids = set(entry.get("user_id") for entry in aggregated_results if entry.get("user_id"))
 
-    # Get last Fusion timestamps for all users
-    last_fusion_timestamps = {}
-    for user_id in user_ids:
-        try:
-            last_fusion_timestamp = get_last_fusion_timestamp(user_id)
-            if last_fusion_timestamp is not None:
-                last_fusion_timestamps[user_id] = last_fusion_timestamp
-        except Exception as e:
-            logger.debug(f"Failed to get last Fusion timestamp for user {user_id}: {e}")
-            # Continue without filtering for this user if query fails
+        # Get last Fusion timestamps for all users
+        last_fusion_timestamps = {}
+        for user_id in user_ids:
+            try:
+                last_fusion_timestamp = get_last_fusion_timestamp(user_id)
+                if last_fusion_timestamp is not None:
+                    last_fusion_timestamps[user_id] = last_fusion_timestamp
+            except Exception as e:
+                logger.debug(f"Failed to get last Fusion timestamp for user {user_id}: {e}")
+                # Continue without filtering for this user if query fails
         
         # Filter aggregated results: only include entries after last Fusion run
         filtered_results = []
@@ -568,9 +569,9 @@ def _read_aggregated_results(limit: int = 100) -> List[Dict]:
         # Return last N filtered results
         return filtered_results[:limit]
         
-except Exception as e:
-    logger.error(f"Error reading aggregated results from memory: {e}", exc_info=True)
-    return []
+    except Exception as e:
+        logger.error(f"Error reading aggregated results from memory: {e}", exc_info=True)
+        return []
 
 
 @router.get("/api/dashboard/status")

@@ -8,9 +8,8 @@ CRITICAL CONSTRAINTS:
 - Peak normalization only (no compression/AGC)
 """
 
-import librosa
-import soundfile as sf
-import numpy as np
+
+# Imports moved to lazy loading
 import tempfile
 import os
 import logging
@@ -46,6 +45,9 @@ def preprocess_audio(
         Path to processed audio file
     """
     try:
+        import librosa
+        import soundfile as sf
+        import numpy as np
         # Step 1: Load audio (auto-resample and mono conversion)
         y, sr = librosa.load(input_path, sr=TARGET_SAMPLE_RATE, mono=True)
         logger.info(f"Loaded audio: {len(y)} samples at {sr}Hz")
@@ -116,6 +118,8 @@ def validate_audio(audio_path: str) -> Tuple[bool, str]:
     Returns:
         Tuple of (is_valid, error_message)
     """
+    import librosa
+    
     try:
         # Check file exists
         if not os.path.exists(audio_path):
@@ -156,6 +160,8 @@ def get_audio_info(audio_path: str) -> dict:
     Returns:
         Dictionary with audio metadata: sample_rate, duration_sec, channels, samples
     """
+    import librosa
+    
     try:
         y, sr = librosa.load(audio_path, sr=None, mono=False)
         duration = len(y) / sr if sr > 0 else 0

@@ -7,43 +7,9 @@ Uses pre-trained model: iic/emotion2vec_plus_base (9-class emotions)
 
 import logging
 import gc
-import librosa
-import numpy as np
-import soundfile as sf
-import tempfile
-import os
-from typing import Tuple
 
-# Monkey-patch torchaudio.load() to use soundfile directly BEFORE importing FunASR
-# This completely bypasses torchcodec/ffmpeg
-import torchaudio
-import torch
-
-_original_torchaudio_load = torchaudio.load
-
-def _patched_torchaudio_load(filepath, *args, **kwargs):
-    """Patched version that uses soundfile directly, bypassing torchcodec entirely."""
-    try:
-        # Use soundfile directly to load audio (bypasses torchcodec)
-        data, sample_rate = sf.read(filepath, dtype='float32')
-        # Convert to torch tensor matching torchaudio format: (channels, samples)
-        if len(data.shape) == 1:
-            # Mono: add channel dimension -> (1, samples)
-            data_tensor = torch.from_numpy(data).unsqueeze(0)
-        else:
-            # Multi-channel: transpose -> (channels, samples)
-            data_tensor = torch.from_numpy(data.T)
-        return data_tensor, sample_rate
-    except Exception as e:
-        # Fallback to original if soundfile fails
-        import logging
-        logging.warning(f"Soundfile load failed for {filepath}, falling back: {e}")
-        kwargs['backend'] = 'soundfile'
-        return _original_torchaudio_load(filepath, *args, **kwargs)
-
-torchaudio.load = _patched_torchaudio_load
-
-from funasr import AutoModel
+# Imports moved to lazy loading in predict_emotion
+from app.config import settings
 
 from app.config import settings
 
@@ -87,6 +53,9 @@ def _load_emotion_model():
     global _ser_model
     
     if _ser_model is None:
+        # Lazy import funasr here
+        from funasr import AutoModel
+        
         logger.info("Loading emotion2vec+ model (first use)...")
         logger.info(f"  Model: {settings.EMOTION2VEC_MODEL}")
         logger.info(f"  Hub: {settings.FUNASR_HUB}")
@@ -138,6 +107,43 @@ def predict_emotion(audio_path: str) -> Tuple[str, float]:
     """
     try:
         import hashlib
+        import librosa
+        import numpy as np
+        import soundfile as sf
+        import tempfile
+        import os
+        
+        # Monkey-patch torchaudio if needed (for FunASR)
+        import torchaudio
+        import torch
+        
+        # We only need to patch it once, but checking attributes or re-patching is fine if simple
+        if not getattr(torchaudio, "_is_patched_by_ser", False):
+            _original_torchaudio_load = torchaudio.load
+            
+            def _patched_torchaudio_load(filepath, *args, **kwargs):
+                """Patched version that uses soundfile directly, bypassing torchcodec entirely."""
+                try:
+                    # Use soundfile directly to load audio (bypasses torchcodec)
+                    data, sample_rate = sf.read(filepath, dtype='float32')
+                    # Convert to torch tensor matching torchaudio format: (channels, samples)
+                    if len(data.shape) == 1:
+                        # Mono: add channel dimension -> (1, samples)
+                        data_tensor = torch.from_numpy(data).unsqueeze(0)
+                    else:
+                        # Multi-channel: transpose -> (channels, samples)
+                        data_tensor = torch.from_numpy(data.T)
+                    return data_tensor, sample_rate
+                except Exception as e:
+                    # Fallback to original if soundfile fails
+                    import logging
+                    logging.warning(f"Soundfile load failed for {filepath}, falling back: {e}")
+                    kwargs['backend'] = 'soundfile'
+                    return _original_torchaudio_load(filepath, *args, **kwargs)
+
+            torchaudio.load = _patched_torchaudio_load
+            setattr(torchaudio, "_is_patched_by_ser", True)
+        
         
         # Lazy load model (only loads on first call)
         model = _load_emotion_model()
