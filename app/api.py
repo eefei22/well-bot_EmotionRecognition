@@ -65,7 +65,9 @@ async def analyze_speech(
 
     # Enqueue for processing
     queue_manager = QueueManager.get_instance()
-    success = queue_manager.enqueue_chunk(user_id, tmp_path, timestamp, filename=file.filename)
+    # Ensure we have a filename for tracking
+    filename_for_queue = file.filename or f"audio_chunk_{timestamp.strftime('%Y%m%d_%H%M%S')}.wav"
+    success = queue_manager.enqueue_chunk(user_id, tmp_path, timestamp, filename=filename_for_queue)
     
     if not success:
         # Clean up temp file if enqueue failed
@@ -159,29 +161,30 @@ async def get_ser_service_status():
                 "status": "processing"
             }
 
-        # Get recent results with database write status
+        # Get recent results from QueueManager only
         recent_results = queue_manager.get_recent_results(limit=20)
-        enhanced_results = []
 
+        # Convert QueueManager results to enhanced format
+        enhanced_results = []
         for result in recent_results:
             result_dict = dict(result)  # Convert to dict if it's not already
 
-            # Check if this result was successfully written to database
-            # We can determine this by checking if the result has database metadata
+            # Database writes happen through aggregation (every 5 minutes by default)
+            # Individual chunk results are processed but final database writes occur during aggregation
             db_write_success = result_dict.get("db_write_success", False)
 
             # Add processing completion info
             enhanced_result = {
                 "user_id": result_dict.get("user_id"),
                 "timestamp": result_dict.get("timestamp"),
-                "filename": result_dict.get("filename"),
+                "filename": result_dict.get("filename", "processed.wav"),
                 "emotion": result_dict.get("emotion"),
                 "emotion_confidence": result_dict.get("emotion_confidence"),
                 "sentiment": result_dict.get("sentiment"),
                 "transcript": result_dict.get("transcript"),
                 "language": result_dict.get("language"),
-                "processing_duration": result_dict.get("processing_duration"),
                 "db_write_success": db_write_success,
+                "aggregation_pending": True,  # Final aggregation happens every 5 minutes
                 "status": "completed"
             }
             enhanced_results.append(enhanced_result)
@@ -214,7 +217,7 @@ async def get_ser_service_status():
             "queue_size": queue_size,
             "recent_requests": recent_requests,
             "current_processing": processing_status,
-            "recent_results": enhanced_results[:10],  # Last 10 results
+            "recent_results": enhanced_results[-10:],  # Last 10 results (most recent)
             "uptime": "unknown"  # Could be enhanced with actual uptime tracking
         }
 

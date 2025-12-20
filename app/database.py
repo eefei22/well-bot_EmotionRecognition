@@ -194,7 +194,7 @@ def query_voice_emotion_signals(
     start_time: datetime,
     end_time: datetime,
     include_synthetic: bool = True
-) -> List:
+) -> List[Dict]:
     """
     Query voice_emotion table and return ModelSignal objects.
     
@@ -205,7 +205,7 @@ def query_voice_emotion_signals(
         include_synthetic: Whether to include synthetic data (default: True)
     
     Returns:
-        List of ModelSignal objects (from fusion.models)
+        List of dictionaries with signal data (fusion module not available in SER deployment)
     """
     try:
         client = _get_supabase_client()
@@ -247,17 +247,14 @@ def query_voice_emotion_signals(
                 logger.debug(f"Skipping unmappable emotion: {ser_emotion}")
                 continue
             
-            # Create ModelSignal object
-            # Import here to avoid circular dependencies
-            from fusion.models import ModelSignal
-            
-            signal = ModelSignal(
-                user_id=user_id,
-                timestamp=record.get("timestamp", ""),
-                modality="speech",
-                emotion_label=fusion_emotion,
-                confidence=float(record.get("emotion_confidence", 0.0))
-            )
+            # Create dict instead of ModelSignal object (fusion module not available)
+            signal = {
+                "user_id": user_id,
+                "timestamp": record.get("timestamp", ""),
+                "modality": "speech",
+                "emotion_label": fusion_emotion,
+                "confidence": float(record.get("emotion_confidence", 0.0))
+            }
             signals.append(signal)
         
         logger.info(

@@ -193,11 +193,13 @@ class QueueManager:
                 # Add to recent results
                 if result:
                     with self._results_lock:
-                        self._recent_results.insert(0, {
+                        result_with_filename = {
                             "user_id": user_id,
                             "timestamp": timestamp.isoformat(),
+                            "filename": filename or os.path.basename(audio_file_path),
                             **result
-                        })
+                        }
+                        self._recent_results.insert(0, result_with_filename)
                         # Keep only last N results
                         if len(self._recent_results) > self._max_recent_results:
                             self._recent_results = self._recent_results[:self._max_recent_results]

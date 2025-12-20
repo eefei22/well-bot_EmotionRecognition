@@ -9,7 +9,7 @@ from datetime import datetime
 import logging
 
 from app.queue_manager import QueueManager
-from app.database import query_voice_emotion_signals, get_malaysia_timezone, get_last_fusion_timestamp
+from app.database import get_malaysia_timezone
 from app.ser_result_logger import read_aggregated_results
 from app.config import settings
 from app.aggregation_interval import AggregationIntervalManager
@@ -501,74 +501,19 @@ async def dashboard():
 
 def _read_aggregated_results(limit: int = 100) -> List[Dict]:
     """
-    Read aggregated results from in-memory storage and filter by fusion timestamp.
-
-    Only returns aggregated results that occurred after the last Fusion run for each user.
+    Read aggregated results from in-memory storage.
 
     Args:
         limit: Maximum number of results to return
 
     Returns:
-        List of aggregated result dictionaries (filtered by fusion timestamp)
+        List of aggregated result dictionaries
     """
     try:
-        # Get all aggregated results from in-memory storage (already sorted newest first)
-        aggregated_results = read_aggregated_results(limit=1000)  # Get more than needed for filtering
+        # Get aggregated results from in-memory storage
+        aggregated_results = read_aggregated_results(limit=limit)
+        return aggregated_results
 
-        if not aggregated_results:
-            return []
-
-        # Filter by fusion timestamp per user
-        # Extract unique user_ids
-        user_ids = set(entry.get("user_id") for entry in aggregated_results if entry.get("user_id"))
-
-        # Get last Fusion timestamps for all users
-        last_fusion_timestamps = {}
-        for user_id in user_ids:
-            try:
-                last_fusion_timestamp = get_last_fusion_timestamp(user_id)
-                if last_fusion_timestamp is not None:
-                    last_fusion_timestamps[user_id] = last_fusion_timestamp
-            except Exception as e:
-                logger.debug(f"Failed to get last Fusion timestamp for user {user_id}: {e}")
-                # Continue without filtering for this user if query fails
-        
-        # Filter aggregated results: only include entries after last Fusion run
-        filtered_results = []
-        malaysia_tz = get_malaysia_timezone()
-        
-        for entry in aggregated_results:
-            user_id = entry.get("user_id", "")
-            entry_timestamp_str = entry.get("timestamp", "")
-            
-            if not entry_timestamp_str:
-                continue
-            
-            # Parse entry timestamp
-            try:
-                entry_timestamp = datetime.fromisoformat(entry_timestamp_str.replace('Z', '+00:00'))
-                if entry_timestamp.tzinfo is None:
-                    entry_timestamp = entry_timestamp.replace(tzinfo=malaysia_tz)
-                else:
-                    entry_timestamp = entry_timestamp.astimezone(malaysia_tz)
-            except Exception as e:
-                logger.debug(f"Failed to parse timestamp {entry_timestamp_str}: {e}")
-                # Include entry if timestamp parsing fails (graceful fallback)
-                filtered_results.append(entry)
-                continue
-            
-            # Filter: only include if no Fusion run exists OR entry is after last Fusion run
-            if user_id and user_id in last_fusion_timestamps:
-                last_fusion_ts = last_fusion_timestamps[user_id]
-                if entry_timestamp <= last_fusion_ts:
-                    # Entry was already processed by Fusion, skip it
-                    continue
-            
-            filtered_results.append(entry)
-        
-        # Return last N filtered results
-        return filtered_results[:limit]
-        
     except Exception as e:
         logger.error(f"Error reading aggregated results from memory: {e}", exc_info=True)
         return []
@@ -591,71 +536,8 @@ async def get_dashboard_status():
         # Get recent results from QueueManager (most recent processing results)
         recent_results = queue_manager.get_recent_results(limit=50)
         
-        # Also query database for recent voice emotion records (last 24 hours)
-        # This supplements QueueManager results with data that may have been written directly
-        try:
-            malaysia_tz = get_malaysia_timezone()
-            now = datetime.now(malaysia_tz)
-            start_time = now - timedelta(hours=24)
-            
-            # Get all unique user_ids from QueueManager results
-            user_ids = set(r.get("user_id") for r in recent_results if r.get("user_id"))
-            
-            # If no user_ids from QueueManager, query for any recent records
-            if not user_ids:
-                # Query database for any recent records (we'll need to get user_ids from somewhere)
-                # For now, we'll rely on QueueManager results and database will be queried per-user as needed
-                pass
-            else:
-                # Query database for each user
-                db_results = []
-                for user_id in user_ids:
-                    try:
-                        # Get last Fusion timestamp to filter out already-processed signals
-                        last_fusion_timestamp = get_last_fusion_timestamp(user_id)
-                        
-                        signals = query_voice_emotion_signals(
-                            user_id=user_id,
-                            start_time=start_time,
-                            end_time=now,
-                            include_synthetic=True
-                        )
-                        # Convert signals to result format and filter by last Fusion timestamp
-                        for signal in signals:
-                            # Parse timestamp
-                            signal_timestamp = datetime.fromisoformat(signal["timestamp"].replace('Z', '+00:00'))
-                            
-                            # Filter: only include signals after last Fusion run
-                            if last_fusion_timestamp is not None:
-                                if signal_timestamp <= last_fusion_timestamp:
-                                    # Signal was already processed by Fusion, skip it
-                                    continue
-                            
-                            db_results.append({
-                                "user_id": user_id,
-                                "timestamp": signal_timestamp.isoformat(),
-                                "emotion": signal["emotion_label"].lower()[:3] if len(signal["emotion_label"].lower()) >= 3 else signal["emotion_label"].lower(),  # Convert back to SER format
-                                "emotion_confidence": signal["confidence"],
-                                "sentiment": None,  # Not available from signal
-                                "sentiment_confidence": None,
-                                "transcript": None,  # Not available from signal
-                                "language": None
-                            })
-                    except Exception as e:
-                        logger.warning(f"Failed to query database for user {user_id}: {e}")
-                        continue
-                
-                # Combine and deduplicate results (prefer QueueManager results as they're more recent)
-                seen_results = {(r["user_id"], r["timestamp"]) for r in recent_results}
-                
-                # Add database results that aren't already in recent_results
-                for result in db_results:
-                    key = (result["user_id"], result["timestamp"])
-                    if key not in seen_results:
-                        recent_results.append(result)
-                        seen_results.add(key)
-        except Exception as e:
-            logger.warning(f"Failed to query database for dashboard results: {e}")
+        # Database queries disabled in SER service deployment
+        # (fusion module not available, avoiding ModuleNotFoundError)
         
         # Sort by timestamp (newest first)
         recent_results.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
