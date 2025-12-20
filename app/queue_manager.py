@@ -168,6 +168,7 @@ class QueueManager:
                     self._processing_item = {
                         "user_id": user_id,
                         "started_at": datetime.now().isoformat(),
+                        "filename": filename or os.path.basename(audio_file_path),
                         "result": None
                     }
                 
