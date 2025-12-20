@@ -39,7 +39,7 @@ async def dashboard():
         }
         
         body {
-            font-family: monospace;
+    font-family: monospace;
             background-color: #000;
             color: #fff;
             padding: 20px;

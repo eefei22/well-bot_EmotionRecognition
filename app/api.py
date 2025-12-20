@@ -123,3 +123,110 @@ def _map_ser_emotion_to_fusion(ser_emotion: str) -> str | None:
 
 
 # Note: /predict endpoint removed - Fusion service now queries database directly
+
+
+@router.get("/status")
+async def get_ser_service_status():
+    """
+    Get detailed SER service status for cloud dashboard monitoring.
+
+    Returns real-time information about:
+    - Recent requests received
+    - Current processing status
+    - Processing results and database write status
+    """
+    try:
+        from app.queue_manager import QueueManager
+        from app.database import get_malaysia_timezone
+        from datetime import datetime, timedelta
+
+        queue_manager = QueueManager.get_instance()
+        malaysia_tz = get_malaysia_timezone()
+        now = datetime.now(malaysia_tz)
+
+        # Get queue status
+        queue_size = queue_manager.get_queue_size()
+        queue_items = queue_manager.get_queue_items()
+
+        # Get processing status
+        processing_item = queue_manager.get_processing_item()
+        processing_status = None
+        if processing_item:
+            processing_status = {
+                "user_id": processing_item.get("user_id"),
+                "started_at": processing_item.get("started_at"),
+                "filename": processing_item.get("filename"),
+                "status": "processing"
+            }
+
+        # Get recent results with database write status
+        recent_results = queue_manager.get_recent_results(limit=20)
+        enhanced_results = []
+
+        for result in recent_results:
+            result_dict = dict(result)  # Convert to dict if it's not already
+
+            # Check if this result was successfully written to database
+            # We can determine this by checking if the result has database metadata
+            db_write_success = result_dict.get("db_write_success", False)
+
+            # Add processing completion info
+            enhanced_result = {
+                "user_id": result_dict.get("user_id"),
+                "timestamp": result_dict.get("timestamp"),
+                "filename": result_dict.get("filename"),
+                "emotion": result_dict.get("emotion"),
+                "emotion_confidence": result_dict.get("emotion_confidence"),
+                "sentiment": result_dict.get("sentiment"),
+                "transcript": result_dict.get("transcript"),
+                "language": result_dict.get("language"),
+                "processing_duration": result_dict.get("processing_duration"),
+                "db_write_success": db_write_success,
+                "status": "completed"
+            }
+            enhanced_results.append(enhanced_result)
+
+        # Get recent requests (last 10 minutes)
+        recent_requests = []
+        ten_minutes_ago = now - timedelta(minutes=10)
+
+        for item in queue_items[-20:]:  # Check last 20 queue items
+            try:
+                item_time = datetime.fromisoformat(item["timestamp"].replace('Z', '+00:00'))
+                if item_time >= ten_minutes_ago:
+                    recent_requests.append({
+                        "user_id": item["user_id"],
+                        "timestamp": item["timestamp"],
+                        "filename": item.get("filename"),
+                        "status": "queued"
+                    })
+            except:
+                continue
+
+        # Sort recent requests by timestamp (newest first)
+        recent_requests.sort(key=lambda x: x["timestamp"], reverse=True)
+        recent_requests = recent_requests[:10]  # Keep only 10 most recent
+
+        return {
+            "service": "ser",
+            "timestamp": now.isoformat(),
+            "status": "healthy",
+            "queue_size": queue_size,
+            "recent_requests": recent_requests,
+            "current_processing": processing_status,
+            "recent_results": enhanced_results[:10],  # Last 10 results
+            "uptime": "unknown"  # Could be enhanced with actual uptime tracking
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting SER service status: {e}", exc_info=True)
+        return {
+            "service": "ser",
+            "timestamp": datetime.now().isoformat(),
+            "status": "error",
+            "error": str(e),
+            "queue_size": 0,
+            "recent_requests": [],
+            "current_processing": None,
+            "recent_results": []
+        }

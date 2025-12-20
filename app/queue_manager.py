@@ -265,8 +265,10 @@ class QueueManager:
                 audio_metadata=audio_metadata,
                 is_synthetic=False
             )
-            
-            if db_result:
+
+            db_write_success = db_result is not None
+
+            if db_write_success:
                 logger.info(
                     f"Processed and stored chunk for user {user_id}: "
                     f"emotion={analysis_result.get('emotion', 'unknown')}, "
@@ -274,7 +276,7 @@ class QueueManager:
                 )
             else:
                 logger.warning(f"Failed to write chunk result to database for user {user_id}")
-            
+
             # Prepare result dict for dashboard and logging
             result_dict = {
                 "emotion": analysis_result.get("emotion", "unknown"),
@@ -282,7 +284,8 @@ class QueueManager:
                 "transcript": analysis_result.get("transcript"),
                 "language": analysis_result.get("language"),
                 "sentiment": analysis_result.get("sentiment"),
-                "sentiment_confidence": analysis_result.get("sentiment_confidence")
+                "sentiment_confidence": analysis_result.get("sentiment_confidence"),
+                "db_write_success": db_write_success
             }
             
             # Log result to in-memory storage
