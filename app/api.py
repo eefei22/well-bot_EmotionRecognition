@@ -16,6 +16,7 @@ from typing import List
 
 from app.queue_manager import QueueManager
 from app.models import PredictRequest, ModelPredictResponse, ModelSignal
+from app.database import get_malaysia_timezone
 
 logger = logging.getLogger(__name__)
 
@@ -60,8 +61,8 @@ async def analyze_speech(
     finally:
         file.file.close()
 
-    # Get current timestamp for this chunk
-    timestamp = datetime.now()
+    # Get current timestamp for this chunk (Malaysia timezone)
+    timestamp = datetime.now(get_malaysia_timezone())
 
     # Enqueue for processing
     queue_manager = QueueManager.get_instance()
@@ -225,7 +226,7 @@ async def get_ser_service_status():
         logger.error(f"Error getting SER service status: {e}", exc_info=True)
         return {
             "service": "ser",
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(get_malaysia_timezone()).isoformat(),
             "status": "error",
             "error": str(e),
             "queue_size": 0,

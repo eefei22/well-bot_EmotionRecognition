@@ -11,6 +11,12 @@ from collections import deque
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 
+# Import get_malaysia_timezone - use lazy import to avoid circular dependencies
+def _get_malaysia_timezone():
+    """Lazy import to avoid circular dependencies."""
+    from app.database import get_malaysia_timezone
+    return get_malaysia_timezone()
+
 logger = logging.getLogger(__name__)
 
 # In-memory storage for SER results
@@ -80,7 +86,7 @@ def log_individual_result(
         log_entry = {
             "user_id": user_id,
             "timestamp": timestamp,
-            "processed_at": datetime.now().isoformat(),
+            "processed_at": datetime.now(_get_malaysia_timezone()).isoformat(),
             **result
         }
 

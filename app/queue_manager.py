@@ -14,7 +14,7 @@ from typing import Tuple, Optional, List, Dict
 from datetime import datetime
 
 from app.processing_pipeline import analyze_full
-from app.database import insert_voice_emotion
+from app.database import insert_voice_emotion, get_malaysia_timezone
 from app.models import ChunkResult
 from app.config import settings
 from app.ser_result_logger import log_individual_result
@@ -167,7 +167,7 @@ class QueueManager:
                 with self._processing_lock:
                     self._processing_item = {
                         "user_id": user_id,
-                        "started_at": datetime.now().isoformat(),
+                        "started_at": datetime.now(get_malaysia_timezone()).isoformat(),
                         "filename": filename or os.path.basename(audio_file_path),
                         "result": None
                     }

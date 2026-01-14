@@ -17,6 +17,7 @@ from app.models import ChunkResult, AggregatedResult
 from app.config import settings
 from app.aggregation_interval import AggregationIntervalManager
 from app.ser_result_logger import log_aggregated_result
+from app.database import get_malaysia_timezone
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +129,7 @@ class Aggregator:
         Run aggregation for all active sessions.
         Aggregates results from the last aggregation window.
         """
-        aggregation_time = datetime.now()
+        aggregation_time = datetime.now(get_malaysia_timezone())
         window_end = aggregation_time
         window_start = window_end - self.aggregation_window
         
