@@ -260,6 +260,18 @@ class QueueManager:
             # Run inference pipeline
             analysis_result = analyze_full(audio_file_path)
             
+            # Check if emotion was skipped (None)
+            emotion = analysis_result.get("emotion")
+            if emotion is None:
+                logger.info(
+                    f"Skipping chunk for user {user_id} - emotion is None "
+                    f"(neutral/other/unknown, not stored in database)"
+                )
+                # Don't store skipped emotions in database
+                # Don't add to recent results
+                # Don't log individual result
+                return None
+            
             # Write directly to database (is_synthetic=False for real audio)
             db_result = insert_voice_emotion(
                 user_id=user_id,
@@ -274,7 +286,7 @@ class QueueManager:
             if db_write_success:
                 logger.info(
                     f"Processed and stored chunk for user {user_id}: "
-                    f"emotion={analysis_result.get('emotion', 'unknown')}, "
+                    f"emotion={emotion}, "
                     f"confidence={analysis_result.get('emotion_confidence', 0.0):.3f}"
                 )
             else:
@@ -282,7 +294,7 @@ class QueueManager:
 
             # Prepare result dict for dashboard and logging
             result_dict = {
-                "emotion": analysis_result.get("emotion", "unknown"),
+                "emotion": emotion,
                 "emotion_confidence": analysis_result.get("emotion_confidence", 0.0),
                 "transcript": analysis_result.get("transcript"),
                 "language": analysis_result.get("language"),

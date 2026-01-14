@@ -24,17 +24,24 @@ logger = logging.getLogger(__name__)
 
 # Mapping from SER emotion labels to fusion emotion labels
 SER_TO_FUSION_EMOTION_MAP = {
-    # 7-class format
+    # 4-class format (capitalized)
+    "Angry": "Angry",
+    "Happy": "Happy",
+    "Sad": "Sad",
+    "Fear": "Fear",
+    # 7-class format (for backward compatibility)
     "ang": "Angry",
     "sad": "Sad",
     "hap": "Happy",
     "fea": "Fear",
-    # 9-class format
+    # 9-class format (for backward compatibility)
     "angry": "Angry",
     "happy": "Happy",
     "fearful": "Fear",
     "fear": "Fear",
-    # Neutral and other emotions are not mapped (will be skipped)
+    "disgusted": "Angry",
+    "surprised": "Fear",
+    # Neutral, other, unknown are not mapped (will be skipped)
 }
 
 
@@ -139,8 +146,13 @@ def insert_voice_emotion(
         timestamp_str = timestamp.isoformat()
         
         # Map SER emotion to database format (keep original SER emotion label)
-        predicted_emotion = analysis_result.get("emotion", "unknown")
+        predicted_emotion = analysis_result.get("emotion")
         emotion_confidence = analysis_result.get("emotion_confidence", 0.0)
+        
+        # Skip if emotion is None (should not happen, but defensive check)
+        if predicted_emotion is None:
+            logger.warning(f"Skipping database insert for user {user_id} - emotion is None")
+            return None
         
         # Prepare data for insertion
         data = {

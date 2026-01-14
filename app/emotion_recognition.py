@@ -10,7 +10,7 @@ import gc
 
 # Imports moved to lazy loading in predict_emotion
 from app.config import settings
-from typing import Tuple  # Add this import
+from typing import Tuple, Optional
 
 from app.config import settings
 
@@ -43,6 +43,17 @@ EMOTION_9_TO_7_MAPPING = {
     "sad": "sad",
     "surprised": "sur",
     "unknown": "unknown"
+}
+
+# Mapping from 9-class to 4-class format (capitalized for fusion service)
+EMOTION_9_TO_4_MAPPING = {
+    "angry": "Angry",
+    "happy": "Happy",
+    "sad": "Sad",
+    "fearful": "Fear",
+    "disgusted": "Angry",  # Negative emotion → Angry
+    "surprised": "Fear",   # Unexpected/startled → Fear
+    # neutral, other, unknown → None (skipped)
 }
 
 
@@ -93,7 +104,22 @@ def _map_emotion_label(emotion_9class: str) -> str:
         return emotion_9class.lower()
 
 
-def predict_emotion(audio_path: str) -> Tuple[str, float]:
+def _map_to_4class(emotion_9class: str) -> Optional[str]:
+    """
+    Map 9-class emotion label to 4-class format (capitalized).
+    
+    Args:
+        emotion_9class: Emotion label from emotion2vec+ (9-class format, lowercase)
+    
+    Returns:
+        Mapped 4-class emotion label (capitalized: "Angry", "Sad", "Happy", "Fear") 
+        or None if emotion should be skipped (neutral, other, unknown)
+    """
+    emotion_lower = emotion_9class.lower()
+    return EMOTION_9_TO_4_MAPPING.get(emotion_lower)
+
+
+def predict_emotion(audio_path: str) -> Tuple[Optional[str], float]:
     """
     Predict emotion from audio file using emotion2vec+ model.
     
@@ -102,9 +128,9 @@ def predict_emotion(audio_path: str) -> Tuple[str, float]:
     
     Returns:
         Tuple of (emotion_label, confidence_score)
-        Emotion label format depends on EMOTION_FORMAT config:
-        - "7class": hap, sad, ang, fea, neu, dis, sur
-        - "9class": angry, disgusted, fearful, happy, neutral, other, sad, surprised, unknown
+        Emotion label is 4-class format (capitalized: "Angry", "Sad", "Happy", "Fear")
+        or None if emotion should be skipped (neutral, other, unknown)
+        Confidence score is preserved from model output
     """
     try:
         import hashlib
@@ -169,11 +195,11 @@ def predict_emotion(audio_path: str) -> Tuple[str, float]:
         # Validate audio
         if len(audio_array) == 0:
             logger.error("Empty audio array")
-            return "unknown", 0.0
+            return None, 0.0
         
         if np.all(audio_array == 0):
             logger.warning("Audio is silent")
-            return "unknown", 0.0
+            return None, 0.0
         
         # Save to temporary WAV file for FunASR (FunASR expects file paths)
         temp_wav = None
@@ -211,7 +237,7 @@ def predict_emotion(audio_path: str) -> Tuple[str, float]:
         
         if not result or len(result) == 0:
             logger.warning("⚠ emotion2vec+ returned empty result")
-            return "unknown", 0.0
+            return None, 0.0
         
         # Handle FunASR result format
         # Result can be a list or dict, depending on FunASR version
@@ -233,10 +259,10 @@ def predict_emotion(audio_path: str) -> Tuple[str, float]:
                         scores = first_result.get("score", [])
                 else:
                     logger.warning(f"⚠ Unexpected result format: {type(first_result)}")
-                    return "unknown", 0.0
+                    return None, 0.0
             else:
                 logger.warning("⚠ Empty result list")
-                return "unknown", 0.0
+                return None, 0.0
         elif isinstance(result, dict):
             labels = result.get("labels", [])
             scores = result.get("scores", [])
@@ -247,7 +273,7 @@ def predict_emotion(audio_path: str) -> Tuple[str, float]:
                 scores = result.get("score", [])
         else:
             logger.warning(f"⚠ Unexpected result type: {type(result)}")
-            return "unknown", 0.0
+            return None, 0.0
         
         logger.info(f"  Extracted labels: {labels}")
         logger.info(f"  Extracted scores: {scores}")
@@ -255,7 +281,7 @@ def predict_emotion(audio_path: str) -> Tuple[str, float]:
         # Get predicted emotion (label with highest confidence score)
         if not labels or not scores:
             logger.warning("⚠ No labels or scores in result")
-            return "unknown", 0.0
+            return None, 0.0
         
         # Convert to lists if needed
         if not isinstance(labels, list):
@@ -276,8 +302,8 @@ def predict_emotion(audio_path: str) -> Tuple[str, float]:
             emotion_9class = str(emotion_9class).split("/")[-1].strip()
             logger.info(f"  Extracted English label from mixed format: {emotion_9class}")
         
-        # Map to configured format
-        emotion_label = _map_emotion_label(emotion_9class)
+        # Map to 4-class format
+        emotion_label = _map_to_4class(emotion_9class)
         
         # Log all probabilities if available
         logger.info("=" * 60)
@@ -285,10 +311,14 @@ def predict_emotion(audio_path: str) -> Tuple[str, float]:
         if isinstance(labels, list) and isinstance(scores, list) and len(labels) == len(scores):
             logger.info("  All probabilities:")
             for label, score in zip(labels, scores):
-                mapped = _map_emotion_label(label)
-                logger.info(f"    {label} -> {mapped}: {float(score):.4f} ({float(score)*100:.2f}%)")
+                mapped_4class = _map_to_4class(label)
+                mapped_4class_str = mapped_4class if mapped_4class else "SKIPPED"
+                logger.info(f"    {label} -> {mapped_4class_str}: {float(score):.4f} ({float(score)*100:.2f}%)")
         logger.info(f"  Predicted (9-class): {emotion_9class}")
-        logger.info(f"  Predicted ({settings.EMOTION_FORMAT}): {emotion_label}")
+        if emotion_label:
+            logger.info(f"  Predicted (4-class): {emotion_label}")
+        else:
+            logger.info(f"  Predicted (4-class): SKIPPED (neutral/other/unknown)")
         logger.info(f"  Confidence: {confidence_score:.4f} ({confidence_score*100:.2f}%)")
         logger.info("=" * 60)
         
@@ -296,8 +326,9 @@ def predict_emotion(audio_path: str) -> Tuple[str, float]:
         del result, audio_array
         gc.collect()
         
+        # Return 4-class emotion or None if skipped
         return emotion_label, confidence_score
         
     except Exception as e:
         logger.error(f"❌ Emotion recognition failed: {e}", exc_info=True)
-        return "unknown", 0.0
+        return None, 0.0

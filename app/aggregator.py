@@ -210,6 +210,11 @@ class Aggregator:
         sentiment_confidences = defaultdict(list)
         
         for result in chunk_results:
+            # Skip results with None emotions (defensive check - should not happen)
+            if result.emotion is None:
+                logger.warning(f"Skipping chunk result with None emotion in aggregation for session {session_id}")
+                continue
+            
             # Collect emotion confidences
             emotion_confidences[result.emotion].append(result.emotion_confidence)
             

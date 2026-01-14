@@ -97,17 +97,24 @@ async def analyze_speech(
 
 # Mapping from SER emotion labels to fusion emotion labels
 SER_TO_FUSION_EMOTION_MAP = {
-    # 7-class format
+    # 4-class format (capitalized)
+    "Angry": "Angry",
+    "Happy": "Happy",
+    "Sad": "Sad",
+    "Fear": "Fear",
+    # 7-class format (for backward compatibility)
     "ang": "Angry",
     "sad": "Sad",
     "hap": "Happy",
     "fea": "Fear",
-    # 9-class format
+    # 9-class format (for backward compatibility)
     "angry": "Angry",
     "happy": "Happy",
     "fearful": "Fear",
     "fear": "Fear",
-    # Neutral and other emotions are not mapped (will be skipped)
+    "disgusted": "Angry",
+    "surprised": "Fear",
+    # Neutral, other, unknown are not mapped (will be skipped)
 }
 
 

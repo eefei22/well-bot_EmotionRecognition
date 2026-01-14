@@ -123,17 +123,20 @@ def analyze_full(audio_path: str) -> dict:
     
     # Step 3: Emotion recognition (on preprocessed audio)
     logger.info("[Step 3/9] Running emotion recognition...")
-    emotion_label = "unknown"
+    emotion_label = None
     emotion_conf = 0.0
     try:
         emotion_audio = processed_path if processed_path else audio_path
         logger.info(f"  Using audio file: {emotion_audio}")
         logger.info(f"  File type: {'Preprocessed' if processed_path else 'Original'}")
         emotion_label, emotion_conf = predict_emotion(emotion_audio)
-        logger.info(f"✓ Emotion detected: {emotion_label} (confidence: {emotion_conf:.4f})")
+        if emotion_label:
+            logger.info(f"✓ Emotion detected: {emotion_label} (confidence: {emotion_conf:.4f})")
+        else:
+            logger.info(f"⚠ Emotion skipped (neutral/other/unknown) - confidence: {emotion_conf:.4f}")
     except Exception as e:
         logger.error(f"❌ Emotion recognition failed: {e}", exc_info=True)
-        emotion_label = "unknown"
+        emotion_label = None
         emotion_conf = 0.0
     
     # Step 4: Quick transcription for language detection
@@ -217,7 +220,7 @@ def analyze_full(audio_path: str) -> dict:
     
     # Return full result
     result = {
-        "emotion": emotion_label,
+        "emotion": emotion_label,  # Can be None if skipped
         "emotion_confidence": emotion_conf,
         "transcript": transcript,
         "language": final_language,
@@ -227,7 +230,8 @@ def analyze_full(audio_path: str) -> dict:
     
     logger.info("=" * 80)
     logger.info("PIPELINE COMPLETE: Final results")
-    logger.info(f"  Emotion: {emotion_label} ({emotion_conf:.4f})")
+    emotion_display = emotion_label if emotion_label else "SKIPPED (None)"
+    logger.info(f"  Emotion: {emotion_display} ({emotion_conf:.4f})")
     logger.info(f"  Transcript: {transcript[:100] if transcript else 'EMPTY'}...")
     logger.info(f"  Language: {final_language}")
     logger.info(f"  Sentiment: {sentiment_label} ({sentiment_conf:.4f})")
