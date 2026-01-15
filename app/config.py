@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     SESSION_GAP_THRESHOLD_SECONDS: int = 60  # 1 minute gap = new session
     FUSION_SERVICE_URL: Optional[str] = None  # Optional, for future auto-send to fusion
     
+    # Queue processing configuration
+    PROCESSING_TIMEOUT_SECONDS: int = 300  # 5 minutes timeout for processing a single chunk
+    
     # Result logging
     RESULTS_LOG_DIR: str = "data/ser_results"  # Directory for result log files
     RESULTS_LOG_ENABLED: bool = True  # Enable/disable result logging to file

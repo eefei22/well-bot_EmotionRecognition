@@ -12,6 +12,7 @@ import json
 from queue import Queue, Empty
 from typing import Tuple, Optional, List, Dict
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 
 from app.processing_pipeline import analyze_full
 from app.database import insert_voice_emotion, get_malaysia_timezone
@@ -51,6 +52,9 @@ class QueueManager:
         self._recent_results: List[Dict] = []  # List of recent ChunkResult dicts
         self._results_lock = threading.Lock()
         self._max_recent_results = 100
+        
+        # Processing timeout (seconds) - prevent worker thread from hanging
+        self.processing_timeout = settings.PROCESSING_TIMEOUT_SECONDS
         
         # Results logging is now in-memory (no file setup needed)
         
@@ -172,18 +176,45 @@ class QueueManager:
                         "result": None
                     }
                 
-                # Process the chunk
-                logger.info(f"Worker: Starting processing for user {user_id}")
-                result = self._process_chunk(user_id, audio_file_path, timestamp)
+                # Process the chunk with timeout to prevent hanging
+                logger.info(f"Worker: Starting processing for user {user_id} (timeout: {self.processing_timeout}s)")
+                processing_start_time = time.time()
                 
-                if result:
-                    logger.info(
-                        f"Worker: Processing completed successfully - "
-                        f"emotion: {result.get('emotion', 'N/A')}, "
-                        f"confidence: {result.get('emotion_confidence', 0.0):.3f}"
+                try:
+                    # Use ThreadPoolExecutor to enforce timeout
+                    with ThreadPoolExecutor(max_workers=1) as executor:
+                        future = executor.submit(self._process_chunk, user_id, audio_file_path, timestamp)
+                        result = future.result(timeout=self.processing_timeout)
+                    
+                    processing_duration = time.time() - processing_start_time
+                    
+                    if result:
+                        logger.info(
+                            f"Worker: Processing completed successfully in {processing_duration:.2f}s - "
+                            f"emotion: {result.get('emotion', 'N/A')}, "
+                            f"confidence: {result.get('emotion_confidence', 0.0):.3f}"
+                        )
+                    else:
+                        logger.warning(
+                            f"Worker: Processing returned None (failed) for user {user_id} "
+                            f"(duration: {processing_duration:.2f}s)"
+                        )
+                        
+                except FutureTimeoutError:
+                    processing_duration = time.time() - processing_start_time
+                    logger.error(
+                        f"Worker: Processing TIMEOUT after {processing_duration:.2f}s for user {user_id}, "
+                        f"file: {filename or os.path.basename(audio_file_path)}. "
+                        f"Skipping this chunk to prevent worker thread from hanging."
                     )
-                else:
-                    logger.warning(f"Worker: Processing returned None (failed) for user {user_id}")
+                    result = None
+                    # Clean up the stuck file
+                    try:
+                        if os.path.exists(audio_file_path):
+                            os.remove(audio_file_path)
+                            logger.debug(f"Cleaned up timed-out file: {audio_file_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to clean up timed-out file: {e}")
                 
                 # Update processing item with result
                 with self._processing_lock:
@@ -214,7 +245,16 @@ class QueueManager:
                 self.queue.task_done()
                 
             except Exception as e:
-                logger.error(f"Error in QueueManager worker loop: {e}", exc_info=True)
+                logger.error(
+                    f"Error in QueueManager worker loop: {e}. "
+                    f"Worker thread will continue processing next item.",
+                    exc_info=True
+                )
+                # Ensure we mark task as done even on error to prevent queue from blocking
+                try:
+                    self.queue.task_done()
+                except Exception:
+                    pass
         
         logger.info("QueueManager worker loop ended")
     

@@ -144,15 +144,25 @@ async def get_ser_service_status():
     - Recent requests received
     - Current processing status
     - Processing results and database write status
+    - Worker thread health
     """
     try:
         from app.queue_manager import QueueManager
         from app.database import get_malaysia_timezone
         from datetime import datetime, timedelta
+        import time
 
         queue_manager = QueueManager.get_instance()
         malaysia_tz = get_malaysia_timezone()
         now = datetime.now(malaysia_tz)
+        
+        # Check worker thread health
+        worker_running = queue_manager.is_running()
+        worker_thread_alive = False
+        worker_thread_name = None
+        if queue_manager.worker_thread:
+            worker_thread_alive = queue_manager.worker_thread.is_alive()
+            worker_thread_name = queue_manager.worker_thread.name
 
         # Get queue status
         queue_size = queue_manager.get_queue_size()
@@ -218,11 +228,25 @@ async def get_ser_service_status():
         recent_requests.sort(key=lambda x: x["timestamp"], reverse=True)
         recent_requests = recent_requests[:10]  # Keep only 10 most recent
 
+        # Determine overall health status
+        health_status = "healthy"
+        if not worker_running or not worker_thread_alive:
+            health_status = "unhealthy"
+            logger.warning(f"Worker thread not running: running={worker_running}, alive={worker_thread_alive}")
+        elif queue_size > 50:  # Large queue might indicate processing issues
+            health_status = "degraded"
+        
         return {
             "service": "ser",
             "timestamp": now.isoformat(),
-            "status": "healthy",
+            "status": health_status,
             "queue_size": queue_size,
+            "worker_thread": {
+                "running": worker_running,
+                "alive": worker_thread_alive,
+                "name": worker_thread_name,
+                "processing_timeout": queue_manager.processing_timeout
+            },
             "recent_requests": recent_requests,
             "current_processing": processing_status,
             "recent_results": enhanced_results[-10:],  # Last 10 results (most recent)
@@ -237,7 +261,52 @@ async def get_ser_service_status():
             "status": "error",
             "error": str(e),
             "queue_size": 0,
+            "worker_thread": {
+                "running": False,
+                "alive": False,
+                "name": None,
+                "processing_timeout": None
+            },
             "recent_requests": [],
             "current_processing": None,
             "recent_results": []
+        }
+
+
+@router.post("/restart-worker")
+async def restart_worker():
+    """
+    Restart the worker thread (useful if it gets stuck).
+    
+    WARNING: This will stop and restart the worker thread.
+    Items currently being processed may be lost.
+    """
+    try:
+        from app.queue_manager import QueueManager
+        
+        queue_manager = QueueManager.get_instance()
+        
+        logger.warning("Manual worker thread restart requested")
+        
+        # Stop worker
+        queue_manager.stop_worker()
+        
+        # Wait a moment
+        import time
+        time.sleep(1)
+        
+        # Start worker again
+        queue_manager.start_worker()
+        
+        return {
+            "status": "success",
+            "message": "Worker thread restarted",
+            "worker_running": queue_manager.is_running(),
+            "queue_size": queue_manager.get_queue_size()
+        }
+    except Exception as e:
+        logger.error(f"Error restarting worker thread: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "error": str(e)
         }
